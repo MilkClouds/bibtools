@@ -5,7 +5,7 @@ Bibtex verification tool using Semantic Scholar as ground truth.
 ## Installation
 
 ```bash
-cd tools/bibtools && uv tool install .
+uv tool install git+https://github.com/MilkClouds/bibtools
 ```
 
 ## Quick Start
