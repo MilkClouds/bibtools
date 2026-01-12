@@ -21,7 +21,7 @@ class ResolvedIds:
     paper_id: str
     doi: str | None
     arxiv_id: str | None
-    venue: str | None  # SS venue for fallback
+    venue: str | None  # For informational purposes only (not used as source of truth)
 
 
 class SemanticScholarClient:

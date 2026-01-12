@@ -123,12 +123,12 @@ def compare_authors(bib_author_field: str, ss_authors: list[str]) -> tuple[bool,
     return True, True
 
 
-def compare_venues(bib_venue: str, ss_venue: str) -> tuple[bool, bool]:
+def compare_venues(bib_venue: str, fetched_venue: str) -> tuple[bool, bool]:
     """Compare venue fields.
 
     Args:
         bib_venue: Venue from bibtex entry.
-        ss_venue: Venue from Semantic Scholar.
+        fetched_venue: Venue from CrossRef/arXiv (source of truth).
 
     Returns:
         Tuple of (match, warning_only).
@@ -139,11 +139,11 @@ def compare_venues(bib_venue: str, ss_venue: str) -> tuple[bool, bool]:
     from .venue_aliases import venues_match
 
     # PASS: Exact raw string match
-    if bib_venue == ss_venue:
+    if bib_venue == fetched_venue:
         return True, False
 
     # Check alias match
-    if venues_match(bib_venue, ss_venue):
+    if venues_match(bib_venue, fetched_venue):
         return True, True  # Alias match -> WARNING
 
     return False, False

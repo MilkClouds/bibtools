@@ -84,13 +84,11 @@ class BibtexGenerator:
             # CrossRef failed with DOI - this is an error
             raise CrossRefError(f"DOI exists but CrossRef lookup failed: {resolved.doi}")
 
-        # Step 3: arXiv fallback
+        # Step 3: arXiv fallback (venue is always "arXiv" - source of truth principle)
         if resolved.arxiv_id:
             arxiv_meta = self.arxiv_client.get_paper_metadata(resolved.arxiv_id)
             if arxiv_meta:
-                # Use SS venue if available (paper may be published)
-                venue = resolved.venue if resolved.venue else "arXiv"
-                metadata = self._arxiv_to_metadata(arxiv_meta, venue)
+                metadata = self._arxiv_to_metadata(arxiv_meta)
                 bibtex = self._metadata_to_bibtex(metadata, paper_id)
                 return FetchResult(bibtex=bibtex, metadata=metadata, discrepancies=discrepancies)
 
@@ -107,13 +105,13 @@ class BibtexGenerator:
             source="crossref",
         )
 
-    def _arxiv_to_metadata(self, ar: ArxivMetadata, venue: str) -> PaperMetadata:
+    def _arxiv_to_metadata(self, ar: ArxivMetadata) -> PaperMetadata:
         """Convert ArxivMetadata to unified PaperMetadata."""
         return PaperMetadata(
             title=ar.title,
             authors=ar.authors,
             year=ar.year,
-            venue=venue,
+            venue=ar.venue,  # Always "arXiv" from ArxivMetadata
             arxiv_id=ar.arxiv_id,
             source="arxiv",
         )
