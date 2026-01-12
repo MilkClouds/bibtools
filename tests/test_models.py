@@ -54,7 +54,7 @@ class TestVerificationResult:
         )
         assert result.entry_key == "test2024"
         assert result.success is True
-        assert result.paper_info is None
+        assert result.metadata is None
 
     def test_create_failed_result(self):
         """Test creating a failed verification result."""

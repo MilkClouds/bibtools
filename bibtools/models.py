@@ -23,6 +23,13 @@ class PaperMetadata:
     arxiv_id: str | None = None
     source: str = ""  # "crossref" or "arxiv"
 
+    def get_authors_str(self) -> str:
+        """Get authors as bibtex-style string ('First Last and First Last')."""
+        from .utils import format_author_bibtex_style
+
+        formatted = [format_author_bibtex_style(a.get("given", ""), a.get("family", "")) for a in self.authors]
+        return " and ".join(formatted)
+
 
 @dataclass
 class SourceDiscrepancy:
@@ -222,7 +229,7 @@ class VerificationResult:
     entry_key: str
     success: bool
     message: str
-    paper_info: PaperInfo | None = None
+    metadata: PaperMetadata | None = None  # Metadata from CrossRef/arXiv
     already_verified: bool = False
     needs_update: bool = False
     no_paper_id: bool = False  # Entry has no paper_id (warning)

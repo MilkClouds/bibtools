@@ -6,8 +6,10 @@ from pathlib import Path
 
 from rich.console import Console
 
+from .arxiv_client import ArxivClient
 from .constants import AUTO_FIND_ID, AUTO_FIND_NONE, AUTO_FIND_TITLE
-from .models import FieldMismatch, PaperInfo, VerificationReport, VerificationResult
+from .crossref import CrossRefClient
+from .models import FieldMismatch, PaperMetadata, VerificationReport, VerificationResult
 from .parser import (
     extract_paper_id_from_entry,
     generate_verification_comment,
@@ -23,36 +25,8 @@ from .utils import (
 )
 
 
-def find_best_match(entry_title: str, papers: list[PaperInfo]) -> PaperInfo | None:
-    """Find the best matching paper from a list.
-
-    Args:
-        entry_title: Title from bibtex entry.
-        papers: List of papers from Semantic Scholar.
-
-    Returns:
-        Best matching paper if similarity > 0.85, None otherwise.
-    """
-    if not papers:
-        return None
-
-    best_match = None
-    best_score = 0.0
-
-    for paper in papers:
-        score = title_similarity(entry_title, paper.title)
-        if score > best_score:
-            best_score = score
-            best_match = paper
-
-    if best_score >= 0.85:
-        return best_match
-
-    return None
-
-
 class BibVerifier:
-    """Verifies bibtex entries using Semantic Scholar."""
+    """Verifies bibtex entries against CrossRef/arXiv (via Semantic Scholar ID resolution)."""
 
     def __init__(
         self,
@@ -77,7 +51,9 @@ class BibVerifier:
         import os
 
         effective_api_key = api_key or os.environ.get("SEMANTIC_SCHOLAR_API_KEY")
-        self.client = SemanticScholarClient(api_key=effective_api_key)
+        self.s2_client = SemanticScholarClient(api_key=effective_api_key)
+        self.crossref_client = CrossRefClient()
+        self.arxiv_client = ArxivClient()
         self.skip_verified = skip_verified
         self.max_age_days = max_age_days
         self.auto_find_level = auto_find_level
@@ -87,6 +63,56 @@ class BibVerifier:
         # Validate auto_find_level
         if auto_find_level not in (AUTO_FIND_NONE, AUTO_FIND_ID, AUTO_FIND_TITLE):
             raise ValueError(f"Invalid auto_find_level: {auto_find_level}")
+
+    def _fetch_metadata(self, paper_id: str) -> PaperMetadata | None:
+        """Fetch paper metadata from CrossRef or arXiv via S2 ID resolution.
+
+        Flow:
+        1. S2 resolves paper_id → DOI/arXiv ID
+        2. If DOI exists → fetch from CrossRef
+        3. Else if arXiv ID exists → fetch from arXiv
+        4. Else → return None
+
+        Args:
+            paper_id: Any paper identifier (DOI:xxx, ARXIV:xxx, CorpusId:xxx, etc.)
+
+        Returns:
+            PaperMetadata with source field set, or None if not found.
+        """
+        # Step 1: Resolve to DOI/arXiv ID via S2
+        resolved = self.s2_client.resolve_ids(paper_id)
+        if not resolved:
+            return None
+
+        # Step 2: Try CrossRef first (most reliable for published papers)
+        if resolved.doi:
+            crossref_meta = self.crossref_client.get_paper_metadata(resolved.doi)
+            if crossref_meta:
+                return PaperMetadata(
+                    title=crossref_meta.title,
+                    authors=crossref_meta.authors,
+                    year=crossref_meta.year,
+                    venue=crossref_meta.venue,
+                    doi=crossref_meta.doi,
+                    arxiv_id=resolved.arxiv_id,
+                    source="crossref",
+                )
+
+        # Step 3: Try arXiv
+        if resolved.arxiv_id:
+            arxiv_meta = self.arxiv_client.get_paper_metadata(resolved.arxiv_id)
+            if arxiv_meta:
+                return PaperMetadata(
+                    title=arxiv_meta.title,
+                    authors=arxiv_meta.authors,
+                    year=arxiv_meta.year,
+                    venue=arxiv_meta.venue,
+                    doi=resolved.doi,
+                    arxiv_id=arxiv_meta.arxiv_id,
+                    source="arxiv",
+                )
+
+        return None
 
     def _should_skip_verified(self, date_str: str | None) -> bool:
         """Determine if a verified entry should be skipped based on age.
@@ -122,7 +148,7 @@ class BibVerifier:
         entry: dict,
         content: str,
     ) -> VerificationResult:
-        """Verify a single bibtex entry.
+        """Verify a single bibtex entry against CrossRef/arXiv.
 
         Args:
             entry: Bibtex entry dictionary.
@@ -148,12 +174,10 @@ class BibVerifier:
         auto_found = source in ("doi", "eprint", "title") if source else False
 
         # If no paper_id and title search is enabled, try title search
-        # Title search returns paper_info directly, avoiding a second API call
-        paper_info: PaperInfo | None = None
         if not paper_id and self.auto_find_level == AUTO_FIND_TITLE:
             title = entry.get("title", "")
             if title:
-                paper_id, source, paper_info = self._search_by_title(entry)
+                paper_id, source = self._search_by_title_for_id(entry)
                 if paper_id:
                     auto_found = True
 
@@ -166,21 +190,20 @@ class BibVerifier:
                 no_paper_id=True,
             )
 
-        # Lookup paper by paper_id (skip if already have paper_info from title search)
-        if paper_info is None:
-            try:
-                paper_info = self.client.get_paper(paper_id)
-            except ConnectionError as e:
-                return VerificationResult(
-                    entry_key=entry_key,
-                    success=False,
-                    message=f"API error: {e}",
-                    paper_id_used=paper_id,
-                    auto_found_paper_id=auto_found,
-                    paper_id_source=source,
-                )
+        # Fetch metadata from CrossRef/arXiv (via S2 ID resolution)
+        try:
+            metadata = self._fetch_metadata(paper_id)
+        except Exception as e:
+            return VerificationResult(
+                entry_key=entry_key,
+                success=False,
+                message=f"API error: {e}",
+                paper_id_used=paper_id,
+                auto_found_paper_id=auto_found,
+                paper_id_source=source,
+            )
 
-        if not paper_info:
+        if not metadata:
             return VerificationResult(
                 entry_key=entry_key,
                 success=False,
@@ -191,7 +214,7 @@ class BibVerifier:
             )
 
         # Verify title, authors, year, venue match
-        mismatches, warnings = self._check_field_mismatches(entry, paper_info, paper_id)
+        mismatches, warnings = self._check_field_mismatches(entry, metadata)
         if mismatches:
             # If fix_mismatches is enabled, mark as fixable instead of failed
             if self.fix_mismatches:
@@ -199,7 +222,7 @@ class BibVerifier:
                     entry_key=entry_key,
                     success=True,  # Considered success because we'll fix it
                     message="Fixed and verified",
-                    paper_info=paper_info,
+                    metadata=metadata,
                     paper_id_used=paper_id,
                     auto_found_paper_id=auto_found,
                     paper_id_source=source,
@@ -214,7 +237,7 @@ class BibVerifier:
                     entry_key=entry_key,
                     success=False,
                     message=f"Field mismatch: {mismatch_fields}",
-                    paper_info=paper_info,
+                    metadata=metadata,
                     paper_id_used=paper_id,
                     auto_found_paper_id=auto_found,
                     paper_id_source=source,
@@ -228,13 +251,11 @@ class BibVerifier:
             warning_fields = ", ".join(w.field_name for w in warnings)
             message = f"Verified (warning: {warning_fields} format differs)"
 
-        # Always update on successful verification
-        # (if we reached here, we didn't skip - either new or re-verifying)
         return VerificationResult(
             entry_key=entry_key,
             success=True,
             message=message,
-            paper_info=paper_info,
+            metadata=metadata,
             paper_id_used=paper_id,
             auto_found_paper_id=auto_found,
             paper_id_source=source,
@@ -243,9 +264,9 @@ class BibVerifier:
         )
 
     def _check_field_mismatches(
-        self, entry: dict, paper_info: PaperInfo, paper_id: str
+        self, entry: dict, metadata: PaperMetadata
     ) -> tuple[list[FieldMismatch], list[FieldMismatch]]:
-        """Check for mismatches between bibtex entry and fetched data.
+        """Check for mismatches between bibtex entry and fetched metadata.
 
         Strict matching: only exact string match is PASS.
         - Exact match: PASS
@@ -254,36 +275,29 @@ class BibVerifier:
 
         Args:
             entry: Bibtex entry dictionary.
-            paper_info: Paper information from API.
-            paper_id: Paper identifier (used to determine source).
+            metadata: Paper metadata from CrossRef/arXiv.
 
         Returns:
             Tuple of (mismatches, warnings).
             - mismatches: Hard errors (FAIL).
             - warnings: Soft issues (WARNING).
         """
-        # Determine source from paper_id
-        if paper_id.upper().startswith("DOI:"):
-            source = "crossref"
-        elif paper_id.upper().startswith("ARXIV:"):
-            source = "arxiv"
-        else:
-            source = "S2"
+        source = metadata.source
         mismatches = []
         warnings = []
 
         # Check title
         bib_title = entry.get("title", "")
-        if bib_title and paper_info.title:
-            match, warning_only = compare_titles(bib_title, paper_info.title)
+        if bib_title and metadata.title:
+            match, warning_only = compare_titles(bib_title, metadata.title)
             if not match:
                 mismatches.append(
                     FieldMismatch(
                         field_name="title",
                         bibtex_value=bib_title,
-                        fetched_value=paper_info.title,
+                        fetched_value=metadata.title,
                         source=source,
-                        similarity=title_similarity(bib_title, paper_info.title),
+                        similarity=title_similarity(bib_title, metadata.title),
                         is_warning=False,
                     )
                 )
@@ -292,7 +306,7 @@ class BibVerifier:
                     FieldMismatch(
                         field_name="title",
                         bibtex_value=bib_title,
-                        fetched_value=paper_info.title,
+                        fetched_value=metadata.title,
                         source=source,
                         is_warning=True,
                     )
@@ -300,9 +314,11 @@ class BibVerifier:
 
         # Check authors
         bib_author_field = entry.get("author", "")
-        if bib_author_field and paper_info.authors:
-            api_author_str = " and ".join(paper_info.authors)
-            match, warning_only = compare_authors(bib_author_field, paper_info.authors)
+        if bib_author_field and metadata.authors:
+            api_author_str = metadata.get_authors_str()
+            # compare_authors expects list of names, convert from dict format
+            author_names = [f"{a.get('given', '')} {a.get('family', '')}".strip() for a in metadata.authors]
+            match, warning_only = compare_authors(bib_author_field, author_names)
             if not match:
                 mismatches.append(
                     FieldMismatch(
@@ -326,15 +342,15 @@ class BibVerifier:
 
         # Check year (must be exact)
         bib_year = entry.get("year", "")
-        if bib_year and paper_info.year:
+        if bib_year and metadata.year:
             try:
                 bib_year_int = int(bib_year)
-                if bib_year_int != paper_info.year:
+                if bib_year_int != metadata.year:
                     mismatches.append(
                         FieldMismatch(
                             field_name="year",
                             bibtex_value=str(bib_year_int),
-                            fetched_value=str(paper_info.year),
+                            fetched_value=str(metadata.year),
                             source=source,
                         )
                     )
@@ -343,14 +359,14 @@ class BibVerifier:
 
         # Check venue
         bib_venue = entry.get("journal", "") or entry.get("booktitle", "")
-        if bib_venue and paper_info.venue:
-            match, warning_only = compare_venues(bib_venue, paper_info.venue)
+        if bib_venue and metadata.venue:
+            match, warning_only = compare_venues(bib_venue, metadata.venue)
             if not match:
                 mismatches.append(
                     FieldMismatch(
                         field_name="venue",
                         bibtex_value=bib_venue,
-                        fetched_value=paper_info.venue,
+                        fetched_value=metadata.venue,
                         source=source,
                         is_warning=False,
                     )
@@ -360,7 +376,7 @@ class BibVerifier:
                     FieldMismatch(
                         field_name="venue",
                         bibtex_value=bib_venue,
-                        fetched_value=paper_info.venue,
+                        fetched_value=metadata.venue,
                         source=source,
                         is_warning=True,
                     )
@@ -368,46 +384,54 @@ class BibVerifier:
 
         return mismatches, warnings
 
-    def _search_by_title(self, entry: dict) -> tuple[str | None, str | None, PaperInfo | None]:
+    def _search_by_title_for_id(self, entry: dict) -> tuple[str | None, str | None]:
         """Search for paper by title and return paper_id if found with high confidence.
+
+        Uses S2 search to find a paper, then returns its paper_id for subsequent
+        metadata lookup from CrossRef/arXiv.
 
         Args:
             entry: Bibtex entry dictionary.
 
         Returns:
-            Tuple of (paper_id, source, paper_info).
-            - paper_id: Canonical paper ID (ARXIV:xxx or DOI:xxx)
+            Tuple of (paper_id, source).
+            - paper_id: S2 paper ID for subsequent resolve_ids() call
             - source: "title" if found, None otherwise
-            - paper_info: PaperInfo from search (avoids second API call)
         """
         title = entry.get("title", "")
         if not title:
-            return None, None, None
+            return None, None
 
         # Strip LaTeX braces for search
         from .utils import strip_latex_braces
 
         search_title = strip_latex_braces(title)
 
-        # Search by title
+        # Search by title via S2
         try:
-            papers = self.client.search_by_title(search_title, limit=3)
+            papers = self.s2_client.search_by_title(search_title, limit=3)
         except ConnectionError:
-            return None, None, None
+            return None, None
 
         if not papers:
-            return None, None, None
+            return None, None
 
-        # Find best match
-        best_match = find_best_match(title, papers)
-        if not best_match:
-            return None, None, None
+        # Find best match by title similarity
+        best_match = None
+        best_score = 0.0
+        for paper in papers:
+            score = title_similarity(title, paper.title)
+            if score > best_score:
+                best_score = score
+                best_match = paper
 
-        # Use Semantic Scholar paper_id
-        return best_match.paper_id, "title", best_match
+        if best_score >= 0.85 and best_match:
+            return best_match.paper_id, "title"
+
+        return None, None
 
     def verify_file(self, file_path: Path, show_progress: bool = True) -> tuple[VerificationReport, str]:
-        """Verify all entries in a bibtex file using batch API.
+        """Verify all entries in a bibtex file.
 
         Args:
             file_path: Path to the .bib file.
@@ -422,9 +446,8 @@ class BibVerifier:
         report = VerificationReport()
         updated_content = content
 
-        # Phase 1: Collect paper_ids to fetch
-        # (entry, paper_id, source, auto_found, paper_info_from_title)
-        entries_to_verify: list[tuple[dict, str, str, bool, PaperInfo | None]] = []
+        # Collect entries to verify
+        entries_to_verify: list[tuple[dict, str, str, bool]] = []  # (entry, paper_id, source, auto_found)
         for entry in entries:
             entry_key = entry.get("ID", "unknown")
 
@@ -446,11 +469,10 @@ class BibVerifier:
             auto_found = source in ("doi", "eprint", "title") if source else False
 
             # If no paper_id and title search is enabled, try title search
-            paper_info_from_title: PaperInfo | None = None
             if not paper_id and self.auto_find_level == AUTO_FIND_TITLE:
                 title = entry.get("title", "")
                 if title:
-                    paper_id, source, paper_info_from_title = self._search_by_title(entry)
+                    paper_id, source = self._search_by_title_for_id(entry)
                     if paper_id:
                         auto_found = True
 
@@ -465,76 +487,67 @@ class BibVerifier:
                 )
                 continue
 
-            entries_to_verify.append((entry, paper_id, source or "", auto_found, paper_info_from_title))
+            entries_to_verify.append((entry, paper_id, source or "", auto_found))
 
         if not entries_to_verify:
             return report, updated_content
 
-        # Phase 2: Batch fetch papers (only those not already found via title search)
-        paper_ids = [
-            paper_id for _, paper_id, _, _, paper_info_from_title in entries_to_verify if paper_info_from_title is None
-        ]
+        # Verify each entry
         if show_progress:
-            self.console.print(f"[dim]Fetching {len(paper_ids)} papers via batch API...[/]")
-
-        try:
-            papers_map = self.client.get_papers_batch(paper_ids)
-        except ConnectionError as e:
-            # If batch fails, fall back to individual requests
-            self.console.print(f"[yellow]Batch API failed, falling back to individual requests: {e}[/]")
-            papers_map = {}
-            for paper_id in paper_ids:
-                try:
-                    papers_map[paper_id] = self.client.get_paper(paper_id)
-                except ConnectionError:
-                    papers_map[paper_id] = None
-
-        # Phase 3: Verify each entry with fetched data
-        if show_progress and len(entries_to_verify) > 0:
+            self.console.print(f"[dim]Verifying {len(entries_to_verify)} entries...[/]")
             entry_iter = tqdm(entries_to_verify, desc="Verifying", unit="entry", leave=False)
         else:
             entry_iter = entries_to_verify
 
-        for entry, paper_id, source, auto_found, paper_info_from_title in entry_iter:
-            # Use paper_info from title search if available, otherwise from batch fetch
-            paper_info = paper_info_from_title or papers_map.get(paper_id)
-            result = self._verify_entry_with_paper(entry, paper_id, source, auto_found, paper_info)
+        for entry, paper_id, source, auto_found in entry_iter:
+            result = self._verify_entry_with_metadata(entry, paper_id, source, auto_found)
             report.add_result(result)
 
             # Only mark as verified if PASS (success without warnings)
             is_pass = result.success and not result.warnings
-            if is_pass and result.needs_update and result.paper_info and result.paper_id_used:
+            if is_pass and result.needs_update and result.metadata and result.paper_id_used:
                 if result.fixed and result.mismatches:
                     updated_content = self._apply_field_fixes(
-                        updated_content, entry, result.paper_info, result.mismatches
+                        updated_content, entry, result.metadata, result.mismatches
                     )
                 updated_content = self._add_verification_comment(updated_content, entry, result.paper_id_used)
 
         return report, updated_content
 
-    def _verify_entry_with_paper(
+    def _verify_entry_with_metadata(
         self,
         entry: dict,
         paper_id: str,
         source: str,
         auto_found: bool,
-        paper_info: PaperInfo | None,
     ) -> VerificationResult:
-        """Verify entry with pre-fetched paper info.
+        """Verify entry by fetching metadata from CrossRef/arXiv.
 
         Args:
             entry: Bibtex entry dictionary.
             paper_id: Paper ID used for lookup.
             source: Source of paper_id.
             auto_found: Whether paper_id was auto-found.
-            paper_info: Pre-fetched paper info (or None if not found).
 
         Returns:
             Verification result.
         """
         entry_key = entry.get("ID", "unknown")
 
-        if not paper_info:
+        # Fetch metadata from CrossRef/arXiv
+        try:
+            metadata = self._fetch_metadata(paper_id)
+        except Exception as e:
+            return VerificationResult(
+                entry_key=entry_key,
+                success=False,
+                message=f"API error: {e}",
+                paper_id_used=paper_id,
+                auto_found_paper_id=auto_found,
+                paper_id_source=source,
+            )
+
+        if not metadata:
             return VerificationResult(
                 entry_key=entry_key,
                 success=False,
@@ -545,14 +558,14 @@ class BibVerifier:
             )
 
         # Verify title, authors, year, venue match
-        mismatches, warnings = self._check_field_mismatches(entry, paper_info, paper_id)
+        mismatches, warnings = self._check_field_mismatches(entry, metadata)
         if mismatches:
             if self.fix_mismatches:
                 return VerificationResult(
                     entry_key=entry_key,
                     success=True,
                     message="Fixed and verified",
-                    paper_info=paper_info,
+                    metadata=metadata,
                     paper_id_used=paper_id,
                     auto_found_paper_id=auto_found,
                     paper_id_source=source,
@@ -567,7 +580,7 @@ class BibVerifier:
                     entry_key=entry_key,
                     success=False,
                     message=f"Field mismatch: {mismatch_fields}",
-                    paper_info=paper_info,
+                    metadata=metadata,
                     paper_id_used=paper_id,
                     auto_found_paper_id=auto_found,
                     paper_id_source=source,
@@ -584,7 +597,7 @@ class BibVerifier:
             entry_key=entry_key,
             success=True,
             message=message,
-            paper_info=paper_info,
+            metadata=metadata,
             paper_id_used=paper_id,
             auto_found_paper_id=auto_found,
             paper_id_source=source,
@@ -650,7 +663,7 @@ class BibVerifier:
         self,
         content: str,
         entry: dict,
-        paper_info: PaperInfo,
+        metadata: PaperMetadata,
         mismatches: list[FieldMismatch],
     ) -> str:
         """Apply field fixes to an entry.
@@ -658,7 +671,7 @@ class BibVerifier:
         Args:
             content: File content.
             entry: Bibtex entry dictionary.
-            paper_info: Paper information from Semantic Scholar.
+            metadata: Paper metadata from CrossRef/arXiv.
             mismatches: List of field mismatches to fix.
 
         Returns:
@@ -684,14 +697,14 @@ class BibVerifier:
 
             if field_name == "title":
                 # Replace title field
-                updated_entry = self._replace_field(updated_entry, "title", paper_info.title)
+                updated_entry = self._replace_field(updated_entry, "title", metadata.title or "")
             elif field_name == "author":
                 # Replace author field
-                authors_str = " and ".join(paper_info.authors)
+                authors_str = metadata.get_authors_str()
                 updated_entry = self._replace_field(updated_entry, "author", authors_str)
             elif field_name == "year":
                 # Replace year field
-                updated_entry = self._replace_field(updated_entry, "year", str(paper_info.year))
+                updated_entry = self._replace_field(updated_entry, "year", str(metadata.year or ""))
             elif field_name == "venue":
                 # Replace journal or booktitle
                 if "journal" in entry:
