@@ -408,7 +408,8 @@ class BibVerifier:
         updated_content = content
 
         # Phase 1: Collect paper_ids to fetch
-        entries_to_verify: list[tuple[dict, str, str, bool]] = []  # (entry, paper_id, source, auto_found)
+        # (entry, paper_id, source, auto_found, paper_info_from_title)
+        entries_to_verify: list[tuple[dict, str, str, bool, PaperInfo | None]] = []
         for entry in entries:
             entry_key = entry.get("ID", "unknown")
 
@@ -429,6 +430,15 @@ class BibVerifier:
             paper_id, source = extract_paper_id_from_entry(entry, content, self.auto_find_level)
             auto_found = source in ("doi", "eprint", "title") if source else False
 
+            # If no paper_id and title search is enabled, try title search
+            paper_info_from_title: PaperInfo | None = None
+            if not paper_id and self.auto_find_level == AUTO_FIND_TITLE:
+                title = entry.get("title", "")
+                if title:
+                    paper_id, source, paper_info_from_title = self._search_by_title(entry)
+                    if paper_id:
+                        auto_found = True
+
             if not paper_id:
                 report.add_result(
                     VerificationResult(
@@ -440,13 +450,15 @@ class BibVerifier:
                 )
                 continue
 
-            entries_to_verify.append((entry, paper_id, source or "", auto_found))
+            entries_to_verify.append((entry, paper_id, source or "", auto_found, paper_info_from_title))
 
         if not entries_to_verify:
             return report, updated_content
 
-        # Phase 2: Batch fetch all papers
-        paper_ids = [paper_id for _, paper_id, _, _ in entries_to_verify]
+        # Phase 2: Batch fetch papers (only those not already found via title search)
+        paper_ids = [
+            paper_id for _, paper_id, _, _, paper_info_from_title in entries_to_verify if paper_info_from_title is None
+        ]
         if show_progress:
             self.console.print(f"[dim]Fetching {len(paper_ids)} papers via batch API...[/]")
 
@@ -468,8 +480,10 @@ class BibVerifier:
         else:
             entry_iter = entries_to_verify
 
-        for entry, paper_id, source, auto_found in entry_iter:
-            result = self._verify_entry_with_paper(entry, paper_id, source, auto_found, papers_map.get(paper_id))
+        for entry, paper_id, source, auto_found, paper_info_from_title in entry_iter:
+            # Use paper_info from title search if available, otherwise from batch fetch
+            paper_info = paper_info_from_title or papers_map.get(paper_id)
+            result = self._verify_entry_with_paper(entry, paper_id, source, auto_found, paper_info)
             report.add_result(result)
 
             # Only mark as verified if PASS (success without warnings)
