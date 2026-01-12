@@ -4,13 +4,15 @@ from dataclasses import dataclass
 
 import arxiv
 
+from .models import Author
+
 
 @dataclass
 class ArxivMetadata:
     """Paper metadata from arXiv."""
 
     title: str
-    authors: list[dict[str, str]]  # [{'given': 'John', 'family': 'Doe'}, ...]
+    authors: list[Author]
     year: int
     arxiv_id: str
     venue: str = "arXiv"
@@ -22,7 +24,7 @@ class ArxivClient:
     def __init__(self) -> None:
         self._client = arxiv.Client()
 
-    def get_authors_by_arxiv_id(self, arxiv_id: str) -> list[dict[str, str]] | None:
+    def get_authors_by_arxiv_id(self, arxiv_id: str) -> list[Author] | None:
         """Get author names by arXiv ID. Returns None if not found."""
         result = self._fetch_paper(arxiv_id)
         return result.authors if result else None
@@ -32,7 +34,14 @@ class ArxivClient:
         return self._fetch_paper(arxiv_id)
 
     def _fetch_paper(self, arxiv_id: str) -> ArxivMetadata | None:
-        """Fetch paper from arXiv API."""
+        """Fetch paper from arXiv API.
+
+        Returns:
+            ArxivMetadata if found, None if not found.
+
+        Raises:
+            ArxivError: On network or API errors.
+        """
         normalized_id = self._normalize_arxiv_id(arxiv_id)
         try:
             search = arxiv.Search(id_list=[normalized_id])
@@ -50,8 +59,13 @@ class ArxivClient:
                 year=paper.published.year,
                 arxiv_id=normalized_id,
             )
-        except Exception:
+        except arxiv.HTTPError as e:
+            raise ArxivError(f"HTTP error fetching {arxiv_id}: {e}") from e
+        except arxiv.UnexpectedEmptyPageError as e:
+            # Paper not found (empty response)
             return None
+        except Exception as e:
+            raise ArxivError(f"Error fetching {arxiv_id}: {e}") from e
 
     def _normalize_arxiv_id(self, arxiv_id: str) -> str:
         """Normalize arXiv ID: remove prefix and version suffix."""
@@ -60,15 +74,15 @@ class ArxivClient:
             arxiv_id = arxiv_id.rsplit("v", 1)[0]
         return arxiv_id
 
-    def _parse_author_name(self, name: str) -> dict[str, str] | None:
-        """Parse 'Firstname Lastname' into {'given': ..., 'family': ...}."""
+    def _parse_author_name(self, name: str) -> Author | None:
+        """Parse 'Firstname Lastname' into Author dict."""
         name = " ".join(name.split())
         if not name:
             return None
         parts = name.rsplit(None, 1)
         if len(parts) == 2:
-            return {"given": parts[0], "family": parts[1]}
-        return {"given": "", "family": parts[0]} if parts else None
+            return Author(given=parts[0], family=parts[1])
+        return Author(given="", family=parts[0]) if parts else None
 
 
 class ArxivError(Exception):

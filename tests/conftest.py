@@ -54,7 +54,7 @@ def make_metadata() -> Callable[..., PaperMetadata]:
             if len(parts) >= 2:
                 author_dicts.append({"given": " ".join(parts[:-1]), "family": parts[-1]})
             else:
-                author_dicts.append({"family": author})
+                author_dicts.append({"given": "", "family": author})
         return PaperMetadata(
             title=title,
             authors=author_dicts,

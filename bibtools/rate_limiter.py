@@ -90,3 +90,13 @@ def get_rate_limiter(api_key: str | None = None) -> RateLimiter:
         if key not in _rate_limiters:
             _rate_limiters[key] = RateLimiter(min_interval=min_interval)
         return _rate_limiters[key]
+
+
+def reset_all_rate_limiters() -> None:
+    """Reset all global rate limiters.
+
+    Useful for testing to ensure test isolation. Each test can call this
+    in setup to start with fresh rate limiter state.
+    """
+    with _global_lock:
+        _rate_limiters.clear()

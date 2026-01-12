@@ -18,15 +18,38 @@ from .utils import format_author_bibtex_style
 class BibtexGenerator:
     """Generate bibtex entries. Primary: CrossRef, Fallback: arXiv."""
 
-    def __init__(self, api_key: str | None = None):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        *,
+        ss_client: SemanticScholarClient | None = None,
+        crossref_client: CrossRefClient | None = None,
+        arxiv_client: ArxivClient | None = None,
+    ):
+        """Initialize the generator.
+
+        Args:
+            api_key: Optional Semantic Scholar API key.
+            ss_client: Optional pre-configured SemanticScholarClient (for sharing).
+            crossref_client: Optional pre-configured CrossRefClient (for sharing).
+            arxiv_client: Optional pre-configured ArxivClient (for sharing).
+        """
         effective_api_key = api_key or os.environ.get("SEMANTIC_SCHOLAR_API_KEY")
-        self.ss_client = SemanticScholarClient(api_key=effective_api_key)
-        self.crossref_client = CrossRefClient()
-        self.arxiv_client = ArxivClient()
+        self.ss_client = ss_client or SemanticScholarClient(api_key=effective_api_key)
+        self.crossref_client = crossref_client or CrossRefClient()
+        self.arxiv_client = arxiv_client or ArxivClient()
+        # Track which clients we own (for proper cleanup)
+        self._owns_ss = ss_client is None
+        self._owns_crossref = crossref_client is None
+        self._owns_arxiv = arxiv_client is None
 
     def close(self) -> None:
-        self.ss_client.close()
-        self.crossref_client.close()
+        """Close owned clients only."""
+        if self._owns_ss:
+            self.ss_client.close()
+        if self._owns_crossref:
+            self.crossref_client.close()
+        # ArxivClient doesn't need closing (uses feedparser, no persistent connection)
 
     def __enter__(self) -> "BibtexGenerator":
         return self

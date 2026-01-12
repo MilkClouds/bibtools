@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from .models import Author
 from .rate_limiter import RateLimiter
 
 
@@ -13,7 +14,7 @@ class CrossRefMetadata:
     """Paper metadata from CrossRef."""
 
     title: str
-    authors: list[dict[str, str]]  # [{'given': 'John', 'family': 'Doe'}, ...]
+    authors: list[Author]
     venue: str | None
     year: int | None
     doi: str
@@ -60,7 +61,7 @@ class CrossRefClient:
     def __exit__(self, *args) -> None:
         self.close()
 
-    def get_authors_by_doi(self, doi: str) -> list[dict[str, str]] | None:
+    def get_authors_by_doi(self, doi: str) -> list[Author] | None:
         """Get author names by DOI. Returns None if not found."""
         meta = self.get_paper_metadata(doi)
         return meta.authors if meta and meta.authors else None
@@ -104,10 +105,10 @@ class CrossRefClient:
         title = titles[0] if titles else ""
 
         # Authors
-        authors = []
+        authors: list[Author] = []
         for author in message.get("author", []):
-            if "given" in author and "family" in author:
-                authors.append({"given": author["given"], "family": author["family"]})
+            if "family" in author:
+                authors.append(Author(given=author.get("given", ""), family=author["family"]))
 
         # Venue: container-title (journal/proceedings name)
         containers = message.get("container-title", [])

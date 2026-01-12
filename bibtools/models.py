@@ -5,10 +5,18 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import IntEnum
+from typing import TypedDict
 
 # =============================================================================
 # Paper Metadata Models
 # =============================================================================
+
+
+class Author(TypedDict):
+    """Author name structure used across all API clients."""
+
+    given: str  # First/given name (can be empty string for single-name authors)
+    family: str  # Last/family name
 
 
 @dataclass
@@ -16,7 +24,7 @@ class PaperMetadata:
     """Unified paper metadata from CrossRef or arXiv."""
 
     title: str
-    authors: list[dict[str, str]]  # [{'given': 'John', 'family': 'Doe'}, ...]
+    authors: list[Author]
     year: int | None
     venue: str | None
     doi: str | None = None

@@ -36,6 +36,10 @@ class BibVerifier:
         auto_find_level: str = "id",
         fix_mismatches: bool = False,
         console: Console | None = None,
+        *,
+        s2_client: SemanticScholarClient | None = None,
+        crossref_client: CrossRefClient | None = None,
+        arxiv_client: ArxivClient | None = None,
     ):
         """Initialize the verifier.
 
@@ -47,13 +51,21 @@ class BibVerifier:
             auto_find_level: Level of auto-find: "none", "id", or "title".
             fix_mismatches: Automatically fix mismatched fields.
             console: Rich console for output.
+            s2_client: Optional pre-configured SemanticScholarClient (for sharing).
+            crossref_client: Optional pre-configured CrossRefClient (for sharing).
+            arxiv_client: Optional pre-configured ArxivClient (for sharing).
         """
         import os
 
         effective_api_key = api_key or os.environ.get("SEMANTIC_SCHOLAR_API_KEY")
-        self.s2_client = SemanticScholarClient(api_key=effective_api_key)
-        self.crossref_client = CrossRefClient()
-        self.arxiv_client = ArxivClient()
+        self.s2_client = s2_client or SemanticScholarClient(api_key=effective_api_key)
+        self.crossref_client = crossref_client or CrossRefClient()
+        self.arxiv_client = arxiv_client or ArxivClient()
+        # Track which clients we own (for proper cleanup)
+        self._owns_s2 = s2_client is None
+        self._owns_crossref = crossref_client is None
+        self._owns_arxiv = arxiv_client is None
+
         self.skip_verified = skip_verified
         self.max_age_days = max_age_days
         self.auto_find_level = auto_find_level
@@ -63,6 +75,20 @@ class BibVerifier:
         # Validate auto_find_level
         if auto_find_level not in (AUTO_FIND_NONE, AUTO_FIND_ID, AUTO_FIND_TITLE):
             raise ValueError(f"Invalid auto_find_level: {auto_find_level}")
+
+    def close(self) -> None:
+        """Close owned clients only."""
+        if self._owns_s2:
+            self.s2_client.close()
+        if self._owns_crossref:
+            self.crossref_client.close()
+        # ArxivClient doesn't need closing (uses feedparser, no persistent connection)
+
+    def __enter__(self) -> "BibVerifier":
+        return self
+
+    def __exit__(self, *args) -> None:
+        self.close()
 
     def _fetch_metadata(self, paper_id: str) -> PaperMetadata | None:
         """Fetch paper metadata from CrossRef or arXiv via S2 ID resolution.
@@ -190,78 +216,8 @@ class BibVerifier:
                 no_paper_id=True,
             )
 
-        # Fetch metadata from CrossRef/arXiv (via S2 ID resolution)
-        try:
-            metadata = self._fetch_metadata(paper_id)
-        except Exception as e:
-            return VerificationResult(
-                entry_key=entry_key,
-                success=False,
-                message=f"API error: {e}",
-                paper_id_used=paper_id,
-                auto_found_paper_id=auto_found,
-                paper_id_source=source,
-            )
-
-        if not metadata:
-            return VerificationResult(
-                entry_key=entry_key,
-                success=False,
-                message=f"Paper not found for {paper_id}",
-                paper_id_used=paper_id,
-                auto_found_paper_id=auto_found,
-                paper_id_source=source,
-            )
-
-        # Verify title, authors, year, venue match
-        mismatches, warnings = self._check_field_mismatches(entry, metadata)
-        if mismatches:
-            # If fix_mismatches is enabled, mark as fixable instead of failed
-            if self.fix_mismatches:
-                return VerificationResult(
-                    entry_key=entry_key,
-                    success=True,  # Considered success because we'll fix it
-                    message="Fixed and verified",
-                    metadata=metadata,
-                    paper_id_used=paper_id,
-                    auto_found_paper_id=auto_found,
-                    paper_id_source=source,
-                    mismatches=mismatches,
-                    warnings=warnings,
-                    fixed=True,
-                    needs_update=True,
-                )
-            else:
-                mismatch_fields = ", ".join(m.field_name for m in mismatches)
-                return VerificationResult(
-                    entry_key=entry_key,
-                    success=False,
-                    message=f"Field mismatch: {mismatch_fields}",
-                    metadata=metadata,
-                    paper_id_used=paper_id,
-                    auto_found_paper_id=auto_found,
-                    paper_id_source=source,
-                    mismatches=mismatches,
-                    warnings=warnings,
-                )
-
-        # Success (with possible warnings)
-        message = "Verified"
-        if warnings:
-            warning_fields = ", ".join(w.field_name for w in warnings)
-            message = f"Verified (warning: {warning_fields} format differs)"
-
-        return VerificationResult(
-            entry_key=entry_key,
-            success=True,
-            message=message,
-            metadata=metadata,
-            paper_id_used=paper_id,
-            auto_found_paper_id=auto_found,
-            paper_id_source=source,
-            warnings=warnings,
-            needs_update=True,
-        )
+        # Delegate to common verification logic
+        return self._verify_entry_with_metadata(entry, paper_id, source or "", auto_found)
 
     def _check_field_mismatches(
         self, entry: dict, metadata: PaperMetadata

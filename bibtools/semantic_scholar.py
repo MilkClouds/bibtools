@@ -7,7 +7,7 @@ import httpx
 
 from .arxiv_client import ArxivClient
 from .crossref import CrossRefClient
-from .models import BibtexEntry, PaperInfo
+from .models import Author, BibtexEntry, PaperInfo
 from .rate_limiter import get_rate_limiter
 from .utils import format_author_bibtex_style, has_abbreviated_authors
 
@@ -53,17 +53,18 @@ class SemanticScholarClient:
         return self._http_client
 
     def close(self) -> None:
-        """Close the HTTP client."""
+        """Close the HTTP client.
+
+        Note: Prefer using context manager (with statement) for automatic cleanup:
+            with SemanticScholarClient() as client:
+                client.search_by_title("...")
+        """
         if self._http_client is not None and not self._http_client.is_closed:
             self._http_client.close()
             self._http_client = None
         if self._crossref_client is not None:
             self._crossref_client.close()
             self._crossref_client = None
-
-    def __del__(self) -> None:
-        """Ensure HTTP client is closed on garbage collection."""
-        self.close()
 
     def __enter__(self) -> "SemanticScholarClient":
         return self
@@ -158,31 +159,31 @@ class SemanticScholarClient:
 
         return None  # Still has abbreviated names
 
-    def _fetch_crossref_authors(self, doi: str) -> list[dict[str, str]] | None:
+    def _fetch_crossref_authors(self, doi: str) -> list[Author] | None:
         """Fetch author names from CrossRef.
 
         Args:
             doi: DOI to lookup.
 
         Returns:
-            List of author dicts with 'given' and 'family' keys, or None if failed.
+            List of Author dicts, or None if failed.
         """
         crossref = self._get_crossref_client()
         return crossref.get_authors_by_doi(doi)
 
-    def _fetch_arxiv_authors(self, arxiv_id: str) -> list[dict[str, str]] | None:
+    def _fetch_arxiv_authors(self, arxiv_id: str) -> list[Author] | None:
         """Fetch author names from arXiv.
 
         Args:
             arxiv_id: arXiv ID to lookup.
 
         Returns:
-            List of author dicts with 'given' and 'family' keys, or None if failed.
+            List of Author dicts, or None if failed.
         """
         arxiv_client = self._get_arxiv_client()
         return arxiv_client.get_authors_by_arxiv_id(arxiv_id)
 
-    def _validate_authors(self, original: list[str], new_authors: list[dict[str, str]]) -> bool:
+    def _validate_authors(self, original: list[str], new_authors: list[Author]) -> bool:
         """Validate that new authors match original authors.
 
         Checks that:
@@ -191,7 +192,7 @@ class SemanticScholarClient:
 
         Args:
             original: Original author name strings.
-            new_authors: New author dicts with 'given' and 'family' keys.
+            new_authors: List of Author dicts.
 
         Returns:
             True if validation passes, False otherwise.
