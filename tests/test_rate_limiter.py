@@ -3,28 +3,26 @@
 import threading
 import time
 
-
 from bibtools.rate_limiter import RateLimiter, get_rate_limiter
 
 
 class TestRateLimiter:
     """Tests for RateLimiter class."""
 
-    def test_first_call_no_wait(self):
-        """First call should not wait."""
+    def test_first_execute_no_wait(self):
+        """First execute should not wait."""
         limiter = RateLimiter(min_interval=1.0)
         start = time.monotonic()
-        limiter.wait()
+        limiter.execute(lambda: None)
         elapsed = time.monotonic() - start
         assert elapsed < 0.1  # Should be nearly instant
 
-    def test_second_call_waits_after_mark(self):
-        """Second call should wait for min_interval after mark_request_done."""
+    def test_second_execute_waits(self):
+        """Second execute should wait for min_interval."""
         limiter = RateLimiter(min_interval=0.2)
-        limiter.wait()
-        limiter.mark_request_done()  # Simulate request completion
+        limiter.execute(lambda: None)
         start = time.monotonic()
-        limiter.wait()
+        limiter.execute(lambda: None)
         elapsed = time.monotonic() - start
         assert elapsed >= 0.15  # Should wait ~0.2s (with some tolerance)
         assert elapsed < 0.4
@@ -32,11 +30,10 @@ class TestRateLimiter:
     def test_no_wait_after_interval(self):
         """Should not wait if enough time has passed."""
         limiter = RateLimiter(min_interval=0.1)
-        limiter.wait()
-        limiter.mark_request_done()
+        limiter.execute(lambda: None)
         time.sleep(0.15)  # Wait longer than interval
         start = time.monotonic()
-        limiter.wait()
+        limiter.execute(lambda: None)
         elapsed = time.monotonic() - start
         assert elapsed < 0.05  # Should be nearly instant
 
@@ -61,7 +58,7 @@ class TestRateLimiter:
         limiter.execute(lambda: None)  # This marks completion
         limiter.reset()
         start = time.monotonic()
-        limiter.wait()
+        limiter.execute(lambda: None)
         elapsed = time.monotonic() - start
         assert elapsed < 0.1  # Should be nearly instant after reset
 
@@ -82,7 +79,7 @@ class TestRateLimiter:
         total_time = time.monotonic() - start
 
         assert len(results) == 5
-        # 5 calls with 0.1s interval should take at least 0.4s
+        # 5 calls with 0.1s interval should take at least 0.4s (4 waits)
         assert total_time >= 0.35
 
 

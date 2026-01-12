@@ -32,11 +32,18 @@ class RateLimiter:
         self._last_request_time: float = 0.0
         self._lock = threading.Lock()
 
-    def wait(self) -> float:
-        """Wait until rate limit allows next request.
+    def execute(self, func: Callable[[], T]) -> T:
+        """Execute function with rate limiting.
+
+        Waits if needed, executes the function, then marks completion.
+        The interval is measured from request completion to next request start.
+        Uses lock to ensure proper serialization of rate-limited calls.
+
+        Args:
+            func: Function to execute.
 
         Returns:
-            Actual wait time in seconds.
+            Result of the function.
         """
         with self._lock:
             now = time.monotonic()
@@ -46,34 +53,10 @@ class RateLimiter:
             if wait_time > 0:
                 time.sleep(wait_time)
 
-            return wait_time
-
-    def mark_request_done(self) -> None:
-        """Mark that a request has completed.
-
-        Call this after the request finishes to record the completion time.
-        The next request will wait min_interval from this point.
-        """
-        with self._lock:
-            self._last_request_time = time.monotonic()
-
-    def execute(self, func: Callable[[], T]) -> T:
-        """Execute function with rate limiting.
-
-        Waits if needed, executes the function, then marks completion.
-        The interval is measured from request completion to next request start.
-
-        Args:
-            func: Function to execute.
-
-        Returns:
-            Result of the function.
-        """
-        self.wait()
-        try:
-            return func()
-        finally:
-            self.mark_request_done()
+            try:
+                return func()
+            finally:
+                self._last_request_time = time.monotonic()
 
     def reset(self) -> None:
         """Reset the rate limiter state."""
