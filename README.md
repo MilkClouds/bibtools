@@ -172,10 +172,7 @@ Auto-found paper_id is written only on PASS.
 
 Set `SEMANTIC_SCHOLAR_API_KEY` environment variable or use `--api-key` for faster requests.
 
-## Comparison with Google Scholar bibtex
+## Comparison with Google Scholar
 
-| Paper | Result | Reason |
-|-------|--------|--------|
-| hirobot2025 | ✅ Better | GS: arXiv, bibtools: ICML |
-| peebles2022dit | ⚠️ Worse | William Peebles vs William S. Peebles |
-| hamlet2025 | ⚠️ Worse | GS fixed typo (Younggyo vs Youngyo) |
+See [docs/comparison_with_google_scholar.md](docs/comparison_with_google_scholar.md) for detailed comparison.
+
