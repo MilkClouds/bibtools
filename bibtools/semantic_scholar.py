@@ -11,7 +11,7 @@ from .models import BibtexEntry, PaperInfo
 from .rate_limiter import get_rate_limiter
 from .utils import format_author_bibtex_style, has_abbreviated_authors
 
-BATCH_SIZE = 500
+_BATCH_SIZE = 500
 
 
 @dataclass
@@ -21,31 +21,22 @@ class ResolvedIds:
     paper_id: str
     doi: str | None
     arxiv_id: str | None
-    venue: str | None  # SS venue for fallback (arXiv-only with published venue)
+    venue: str | None  # SS venue for fallback
 
 
 class SemanticScholarClient:
-    """Client for Semantic Scholar API. Primary role: identifier resolution."""
+    """Semantic Scholar API client.
+
+    Primary role: identifier resolution (paper_id → DOI/arXiv ID).
+    Secondary role: legacy paper lookup with bibtex generation.
+    """
 
     BASE_URL = "https://api.semanticscholar.org/graph/v1"
     FIELDS = "paperId,citationStyles,externalIds,venue"
 
-    def __init__(
-        self,
-        api_key: str | None = None,
-        max_retries: int = 3,
-        use_external_apis: bool = True,
-    ):
-        """Initialize the client.
-
-        Args:
-            api_key: Optional API key for higher rate limits (1 req/sec vs 100 req/5min).
-            max_retries: Maximum number of retries on rate limit errors.
-            use_external_apis: Whether to use CrossRef/arXiv APIs to get full author names.
-        """
+    def __init__(self, api_key: str | None = None, max_retries: int = 3):
         self.api_key = api_key
         self.max_retries = max_retries
-        self.use_external_apis = use_external_apis
         self._rate_limiter = get_rate_limiter(api_key)
         self._http_client: httpx.Client | None = None
         self._crossref_client: CrossRefClient | None = None
@@ -139,25 +130,10 @@ class SemanticScholarClient:
         return PaperInfo(paper_id=paper_id, bibtex=bibtex)
 
     def _enhance_authors(self, bibtex: BibtexEntry, doi: str | None, arxiv_id: str | None) -> BibtexEntry | None:
-        """Enhance author names using external APIs.
+        """Enhance abbreviated author names using CrossRef/arXiv APIs.
 
-        Priority: CrossRef (via DOI) > arXiv API > format only
-
-        Args:
-            bibtex: Original BibtexEntry with authors.
-            doi: DOI if available.
-            arxiv_id: arXiv ID if available.
-
-        Returns:
-            BibtexEntry with enhanced author names, or None if abbreviated names remain.
+        Returns BibtexEntry with full names, or None if abbreviated names remain.
         """
-        if not self.use_external_apis:
-            bibtex.authors = self._format_authors_bibtex_style(bibtex.authors)
-            if has_abbreviated_authors(bibtex.authors):
-                return None
-            return bibtex
-
-        # Check if enhancement is needed
         if not has_abbreviated_authors(bibtex.authors):
             bibtex.authors = self._format_authors_bibtex_style(bibtex.authors)
             return bibtex
@@ -180,8 +156,7 @@ class SemanticScholarClient:
                 if not has_abbreviated_authors(bibtex.authors):
                     return bibtex
 
-        # All enhancement attempts failed or still have abbreviated names
-        return None
+        return None  # Still has abbreviated names
 
     def _fetch_crossref_authors(self, doi: str) -> list[dict[str, str]] | None:
         """Fetch author names from CrossRef.
@@ -400,9 +375,9 @@ class SemanticScholarClient:
 
         results: dict[str, PaperInfo | None] = {}
 
-        # Process in batches of BATCH_SIZE (500)
-        for i in range(0, len(paper_ids), BATCH_SIZE):
-            batch = paper_ids[i : i + BATCH_SIZE]
+        # Process in batches of 500
+        for i in range(0, len(paper_ids), _BATCH_SIZE):
+            batch = paper_ids[i : i + _BATCH_SIZE]
             batch_results = self._get_papers_batch_single(batch)
             results.update(batch_results)
 
@@ -470,8 +445,8 @@ class SemanticScholarClient:
             return {}
 
         results: dict[str, ResolvedIds | None] = {}
-        for i in range(0, len(paper_ids), BATCH_SIZE):
-            batch = paper_ids[i : i + BATCH_SIZE]
+        for i in range(0, len(paper_ids), _BATCH_SIZE):
+            batch = paper_ids[i : i + _BATCH_SIZE]
             batch_results = self._resolve_ids_batch_single(batch)
             results.update(batch_results)
         return results

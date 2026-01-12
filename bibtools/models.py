@@ -1,10 +1,14 @@
-"""Data models for bibtex verification."""
+"""Data models for bibtex verification and generation."""
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
 from enum import IntEnum
+
+# =============================================================================
+# Paper Metadata Models
+# =============================================================================
 
 
 @dataclass
@@ -22,11 +26,20 @@ class PaperMetadata:
 
 @dataclass
 class SourceDiscrepancy:
-    """Discrepancy between CrossRef and Semantic Scholar."""
+    """Discrepancy between data sources (e.g., CrossRef vs Semantic Scholar)."""
 
     field: str
-    crossref_value: str
-    ss_value: str
+    primary_value: str
+    secondary_value: str
+
+
+@dataclass
+class FetchResult:
+    """Result of fetching paper metadata and generating bibtex."""
+
+    bibtex: str
+    metadata: PaperMetadata
+    discrepancies: list[SourceDiscrepancy] = field(default_factory=list)
 
 
 class VerificationStatus(IntEnum):

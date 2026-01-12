@@ -139,8 +139,7 @@ class TestFetchCommand:
         mock_generator = MagicMock()
         mock_generator_class.return_value = mock_generator
 
-        from bibtools.generator import FetchResult
-        from bibtools.models import PaperMetadata
+        from bibtools.models import FetchResult, PaperMetadata
 
         metadata = PaperMetadata(
             title="Test Paper Title",

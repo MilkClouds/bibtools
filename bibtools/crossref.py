@@ -32,8 +32,7 @@ class CrossRefClient:
         """
         self.max_retries = max_retries
         # CrossRef allows 50 requests per second for polite users
-        # Use 0.1 second interval for polite rate limiting
-        self._rate_limiter = RateLimiter(min_interval=0.1)
+        self._rate_limiter = RateLimiter(min_interval=0.02)
         self._http_client: httpx.Client | None = None
 
     def _get_http_client(self) -> httpx.Client:
@@ -62,72 +61,18 @@ class CrossRefClient:
         self.close()
 
     def get_authors_by_doi(self, doi: str) -> list[dict[str, str]] | None:
-        """Get author information by DOI.
-
-        Args:
-            doi: DOI string (with or without 'DOI:' prefix).
-
-        Returns:
-            List of author dicts with 'given' and 'family' keys, or None if not found.
-            Example: [{'given': 'Michael I.', 'family': 'Posner'}, ...]
-        """
-        # Remove DOI: prefix if present
-        if doi.upper().startswith("DOI:"):
-            doi = doi[4:]
-
-        client = self._get_http_client()
-        # Capture doi in closure to avoid late binding issues
-        request_url = f"{self.BASE_URL}/works/{doi}"
-
-        for attempt in range(self.max_retries):
-            try:
-                response = self._rate_limiter.execute(lambda url=request_url: client.get(url))
-
-                if response.status_code == 404:
-                    return None
-
-                if response.status_code == 429:
-                    wait_time = (attempt + 1) * 5
-                    time.sleep(wait_time)
-                    continue
-
-                response.raise_for_status()
-                data = response.json()
-
-                message = data.get("message", {})
-                authors = message.get("author", [])
-
-                result = []
-                for author in authors:
-                    if "given" in author and "family" in author:
-                        result.append(
-                            {
-                                "given": author["given"],
-                                "family": author["family"],
-                            }
-                        )
-                    elif "name" in author:
-                        # Organization or single name - skip or handle
-                        continue
-
-                return result if result else None
-
-            except httpx.HTTPError:
-                if attempt < self.max_retries - 1:
-                    time.sleep((attempt + 1) * 2)
-                    continue
-
-        return None
+        """Get author names by DOI. Returns None if not found."""
+        meta = self.get_paper_metadata(doi)
+        return meta.authors if meta and meta.authors else None
 
     def get_paper_metadata(self, doi: str) -> CrossRefMetadata | None:
-        """Get full paper metadata by DOI.
+        """Get full paper metadata by DOI. Raises CrossRefError on API failure."""
+        doi = doi[4:] if doi.upper().startswith("DOI:") else doi
+        message = self._fetch_work(doi)
+        return self._parse_metadata(message, doi) if message else None
 
-        Returns CrossRefMetadata with title, authors, venue, year.
-        Raises CrossRefError if API fails (not 404).
-        """
-        if doi.upper().startswith("DOI:"):
-            doi = doi[4:]
-
+    def _fetch_work(self, doi: str) -> dict | None:
+        """Fetch work data from CrossRef API. Returns None if 404."""
         client = self._get_http_client()
         request_url = f"{self.BASE_URL}/works/{doi}"
 
@@ -137,14 +82,12 @@ class CrossRefClient:
 
                 if response.status_code == 404:
                     return None
-
                 if response.status_code == 429:
                     time.sleep((attempt + 1) * 5)
                     continue
 
                 response.raise_for_status()
-                data = response.json()
-                return self._parse_metadata(data.get("message", {}), doi)
+                return response.json().get("message", {})
 
             except httpx.HTTPError as e:
                 if attempt < self.max_retries - 1:

@@ -1,6 +1,6 @@
 # bibtools
 
-Bibtex verification tool using Semantic Scholar as ground truth.
+Bibtex verification and generation tool using CrossRef and Semantic Scholar.
 
 ## Installation
 
@@ -17,6 +17,22 @@ bibtools fetch ARXIV:2106.15928       # Fetch bibtex by ID
 bibtools search "Attention Is All You Need"  # Search and generate bibtex
 ```
 
+## Architecture
+
+```
+paper_id → Semantic Scholar (resolve DOI/arXiv ID)
+                ↓
+    DOI exists? → CrossRef (authoritative metadata)
+    No DOI?     → arXiv API (+ SS venue if published)
+                ↓
+           Generate bibtex
+```
+
+**Data sources by priority:**
+1. **CrossRef** (via DOI) - official publication metadata
+2. **arXiv API** - preprint metadata with full author names
+3. **Semantic Scholar** - identifier resolution and venue detection
+
 ## Commands
 
 ### verify
@@ -31,11 +47,12 @@ bibtools verify main.bib --auto-find=none --fix  # Fix mode
 
 ### fetch
 
-Fetches bibtex by paper ID.
+Fetches bibtex by paper ID. Uses CrossRef for DOI-based lookups.
 
 ```bash
 bibtools fetch ARXIV:2106.15928
 bibtools fetch DOI:10.18653/v1/N18-3011
+bibtools fetch DOI:10.1109/CVPR.2016.90  # ResNet - gets correct year from CrossRef
 ```
 
 ### search
@@ -145,9 +162,20 @@ Auto-found paper_id is written only on PASS.
 - `ACL:W12-3903`
 - `PMID:19872477`
 
+## Rate Limits
 
-## Comparison with google scholar bibtex
+| API | Limit | Implementation |
+|-----|-------|----------------|
+| Semantic Scholar | 1 req/sec (with key), 100 req/5min (no key) | 1s or 3s interval |
+| CrossRef | 50 req/sec (official) | 0.02s interval (50 req/sec) |
+| arXiv | No official limit | No throttling |
 
-- hirobot2025: better(google scholar: arxiv, bibtools: icml)
-- peebles2022dit: worse(William Peebles vs William S. Peebles)
-- hamlet2025: worse(google scholar: Younggyo Seo(fix typo on arxiv v2) vs Youngyo Seo)
+Set `SEMANTIC_SCHOLAR_API_KEY` environment variable or use `--api-key` for faster requests.
+
+## Comparison with Google Scholar bibtex
+
+| Paper | Result | Reason |
+|-------|--------|--------|
+| hirobot2025 | ✅ Better | GS: arXiv, bibtools: ICML |
+| peebles2022dit | ⚠️ Worse | William Peebles vs William S. Peebles |
+| hamlet2025 | ⚠️ Worse | GS fixed typo (Younggyo vs Youngyo) |

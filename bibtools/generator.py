@@ -7,22 +7,12 @@ Architecture:
 """
 
 import os
-from dataclasses import dataclass
 
 from .arxiv_client import ArxivClient, ArxivMetadata
 from .crossref import CrossRefClient, CrossRefError, CrossRefMetadata
-from .models import BibtexEntry, PaperInfo, PaperMetadata, SourceDiscrepancy
+from .models import BibtexEntry, FetchResult, PaperInfo, PaperMetadata, SourceDiscrepancy
 from .semantic_scholar import ResolvedIds, SemanticScholarClient
 from .utils import format_author_bibtex_style
-
-
-@dataclass
-class FetchResult:
-    """Result of fetching paper metadata."""
-
-    bibtex: str
-    metadata: PaperMetadata
-    discrepancies: list[SourceDiscrepancy]  # CrossRef vs SS differences
 
 
 class BibtexGenerator:
