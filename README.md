@@ -1,6 +1,38 @@
 # bibtools
 
-Bibtex verification and generation tool using CrossRef and Semantic Scholar.
+**Automated bibtex verification tool** - validates your bibtex entries against official sources (CrossRef, arXiv).
+
+## What it does
+
+1. **verify** - Compare existing .bib entries against official metadata
+2. **fetch** - Generate bibtex from DOI or arXiv ID
+3. **search** - Search papers by title and generate bibtex
+
+## How it works
+
+```
+bibtools verify main.bib
+        ↓
+Extract paper_id (DOI/arXiv ID) from each entry
+        ↓
+Semantic Scholar → Fetch official metadata from CrossRef/arXiv
+        ↓
+Compare with existing entry → PASS / WARNING / FAIL
+```
+
+**Data sources:**
+- **CrossRef** - Official DOI metadata submitted by publishers
+- **arXiv** - Preprint metadata
+- **Semantic Scholar** - Resolves identifiers, detects conference publication
+
+## Is it reliable?
+
+bibtools does **NOT generate or guess metadata**.
+It only uses data from CrossRef (official DOI registry) and arXiv (preprint source).
+
+→ [Comparison with Google Scholar](docs/comparison_with_google_scholar.md)
+
+---
 
 ## Installation
 
@@ -11,27 +43,11 @@ uv tool install git+https://github.com/MilkClouds/bibtools
 ## Quick Start
 
 ```bash
-bibtools verify main.bib              # Verify entries (modifies in-place)
-bibtools verify main.bib --dry-run    # Preview only
-bibtools fetch ARXIV:2106.15928       # Fetch bibtex by ID
-bibtools search "Attention Is All You Need"  # Search and generate bibtex
+bibtools fetch ARXIV:2502.19417       # Fetch bibtex by arXiv ID
+bibtools fetch DOI:10.1109/CVPR.2016.90  # Fetch by DOI
+bibtools verify main.bib              # Verify existing entries
+bibtools search "Attention Is All You Need"  # Search (use with caution)
 ```
-
-## Architecture
-
-```
-paper_id → Semantic Scholar (resolve DOI/arXiv ID)
-                ↓
-    DOI exists? → CrossRef (authoritative metadata)
-    No DOI?     → arXiv API (+ SS venue if published)
-                ↓
-           Generate bibtex
-```
-
-**Data sources by priority:**
-1. **CrossRef** (via DOI) - official publication metadata
-2. **arXiv API** - preprint metadata with full author names
-3. **Semantic Scholar** - identifier resolution and venue detection
 
 ## Commands
 
@@ -90,31 +106,6 @@ Examples:
 - `M. Posner` vs `Michael Posner` → FAIL (abbreviation = content change)
 - `NeurIPS` vs `Neural Information Processing Systems` → WARNING (alias)
 
-### Author Name Enhancement
-
-Semantic Scholar often returns abbreviated names (e.g., `A. Vaswani`). bibtools enhances these via external APIs:
-
-**Priority:**
-1. CrossRef (via DOI) - most reliable for published papers
-2. arXiv API - for preprints
-3. Fallback - format only
-
-**Validation before applying:**
-1. Author count must be identical
-2. Family names must match in exact order (case-insensitive)
-
-```
-Original:  ["A. Vaswani", "N. Shazeer", ...]
-Enhanced:  ["Ashish Vaswani", "Noam Shazeer", ...]
-
-Validation:
-  Count: 8 == 8 ✓
-  Family names: Vaswani==Vaswani ✓, Shazeer==Shazeer ✓, ...
-  → Applied
-```
-
-If validation fails, enhancement is rejected and the next source is tried.
-
 ## Comment Format
 
 ```bibtex
@@ -171,8 +162,3 @@ Auto-found paper_id is written only on PASS.
 | arXiv | No official limit | No throttling |
 
 Set `SEMANTIC_SCHOLAR_API_KEY` environment variable or use `--api-key` for faster requests.
-
-## Comparison with Google Scholar
-
-See [docs/comparison_with_google_scholar.md](docs/comparison_with_google_scholar.md) for detailed comparison.
-
