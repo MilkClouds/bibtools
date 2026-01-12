@@ -1,6 +1,6 @@
 """Tests for verifier module."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from bibtools.utils import (
     compare_authors,

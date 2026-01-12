@@ -61,7 +61,7 @@ class ArxivClient:
             )
         except arxiv.HTTPError as e:
             raise ArxivError(f"HTTP error fetching {arxiv_id}: {e}") from e
-        except arxiv.UnexpectedEmptyPageError as e:
+        except arxiv.UnexpectedEmptyPageError:
             # Paper not found (empty response)
             return None
         except Exception as e:
