@@ -1,0 +1,388 @@
+"""CLI interface for bibtools."""
+
+from pathlib import Path
+from typing import Annotated
+
+import typer
+from rich.console import Console
+
+from . import __version__
+from .constants import AUTO_FIND_ID, AUTO_FIND_NONE, AUTO_FIND_TITLE
+from .generator import BibtexGenerator
+from .verifier import BibVerifier
+
+app = typer.Typer(
+    name="bibtools",
+    help="Bibtex tools: verify, fetch, and search papers via Semantic Scholar API.",
+    add_completion=False,
+)
+
+console = Console()
+
+
+def version_callback(value: bool) -> None:
+    """Print version and exit."""
+    if value:
+        console.print(f"bibtools version {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: Annotated[
+        bool | None,
+        typer.Option(
+            "--version",
+            "-V",
+            callback=version_callback,
+            is_eager=True,
+            help="Show version and exit.",
+        ),
+    ] = None,
+) -> None:
+    """Bibtools - Bibtex utilities powered by Semantic Scholar."""
+
+
+@app.command()
+def verify(
+    bib_file: Annotated[
+        Path,
+        typer.Argument(
+            help="Path to the .bib file to verify.",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+        ),
+    ],
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output file path. If not specified, modifies the input file in-place.",
+        ),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            "-n",
+            help="Don't modify files, just show what would be done.",
+        ),
+    ] = False,
+    skip_verified: Annotated[
+        bool,
+        typer.Option(
+            "--skip-verified/--reverify",
+            help="Skip entries that are already verified. --reverify is equivalent to --max-age=0.",
+        ),
+    ] = True,
+    max_age: Annotated[
+        int | None,
+        typer.Option(
+            "--max-age",
+            help="Re-verify entries older than this many days. Overrides --skip-verified.",
+        ),
+    ] = None,
+    api_key: Annotated[
+        str | None,
+        typer.Option(
+            "--api-key",
+            "-k",
+            envvar="SEMANTIC_SCHOLAR_API_KEY",
+            help="Semantic Scholar API key for higher rate limits.",
+        ),
+    ] = None,
+    auto_find: Annotated[
+        str,
+        typer.Option(
+            "--auto-find",
+            "-a",
+            help="Auto-find paper_id level: none (comment only), id (+ doi/eprint), title (+ title search).",
+        ),
+    ] = "id",
+    fix: Annotated[
+        bool,
+        typer.Option(
+            "--fix",
+            help="Auto-fix mismatched fields. Only allowed with --auto-find=none.",
+        ),
+    ] = False,
+) -> None:
+    """Verify bibtex entries using Semantic Scholar API.
+
+    Auto-find levels:
+      none  - Only use % paper_id: comments (safest)
+      id    - Also use doi/eprint fields (default)
+      title - Also search by title (risky, may find wrong paper)
+
+    Examples:
+      bibtools verify main.bib                    # default: --auto-find=id
+      bibtools verify main.bib --auto-find=none   # strict: comment only
+      bibtools verify main.bib --auto-find=title  # aggressive: title search
+      bibtools verify main.bib --auto-find=none --fix  # fix mode
+    """
+    # Validate auto-find level
+    auto_find_level = auto_find.lower()
+    if auto_find_level not in (AUTO_FIND_NONE, AUTO_FIND_ID, AUTO_FIND_TITLE):
+        console.print(f"[bold red]Error:[/] Invalid --auto-find level: {auto_find}\nValid levels: none, id, title")
+        raise typer.Exit(1)
+
+    # Safety check: --fix only allowed with --auto-find=none
+    if fix and auto_find_level != AUTO_FIND_NONE:
+        console.print(
+            "[bold red]Error:[/] --fix only allowed with --auto-find=none\n"
+            "Use: bibtools verify --auto-find=none --fix main.bib"
+        )
+        raise typer.Exit(1)
+
+    # Display settings
+    console.print(f"\n[bold blue]Verifying:[/] {bib_file}")
+    level_desc = {
+        AUTO_FIND_NONE: "[dim]none[/] (comment only)",
+        AUTO_FIND_ID: "[cyan]id[/] (comment + doi/eprint)",
+        AUTO_FIND_TITLE: "[yellow]title[/] (comment + doi/eprint + title search)",
+    }
+    console.print(f"[dim]Auto-find level:[/] {level_desc[auto_find_level]}")
+    if fix:
+        console.print("[yellow]⚠ Fix mode: enabled - will auto-correct mismatched fields[/]")
+
+    # Handle --reverify as --max-age=0
+    effective_max_age = max_age
+    if not skip_verified:
+        effective_max_age = 0  # --reverify = --max-age 0
+
+    if effective_max_age is not None:
+        if effective_max_age == 0:
+            console.print("[dim]Re-verify:[/] all entries (--reverify or --max-age=0)")
+        else:
+            console.print(f"[dim]Re-verify:[/] entries older than {effective_max_age} days")
+
+    verifier = BibVerifier(
+        api_key=api_key,
+        skip_verified=True,  # Always True when using max_age logic
+        max_age_days=effective_max_age,
+        auto_find_level=auto_find_level,
+        fix_mismatches=fix,
+        console=console,
+    )
+
+    try:
+        report, updated_content = verifier.verify_file(bib_file)
+    except Exception as e:
+        console.print(f"[bold red]Error:[/] {e}")
+        raise typer.Exit(1)
+
+    # Print results (always show important info)
+    _print_actionable_results(report)
+    _print_summary(report)
+
+    # Write output
+    if not dry_run and (report.verified > 0 or report.verified_with_warnings > 0 or report.fixed > 0):
+        output_path = output or bib_file
+        output_path.write_text(updated_content, encoding="utf-8")
+        console.print(f"\n[bold green]Updated:[/] {output_path}")
+    elif dry_run:
+        console.print("\n[yellow]Dry run - no files modified.[/]")
+
+    # Exit with appropriate code based on overall status
+    # 0=PASS, 1=WARNING, 2=FAIL
+    raise typer.Exit(report.exit_code)
+
+
+@app.command()
+def fetch(
+    paper_id: Annotated[
+        str,
+        typer.Argument(
+            help="Paper ID: ARXIV:id, DOI:doi, CorpusId:id, ACL:id, PMID:id, etc.",
+        ),
+    ],
+    api_key: Annotated[
+        str | None,
+        typer.Option(
+            "--api-key",
+            "-k",
+            envvar="SEMANTIC_SCHOLAR_API_KEY",
+            help="Semantic Scholar API key for higher rate limits.",
+        ),
+    ] = None,
+) -> None:
+    """Fetch bibtex entry by paper ID.
+
+    Examples:
+        bibtools fetch ARXIV:2106.15928
+        bibtools fetch "DOI:10.18653/v1/N18-3011"
+    """
+    generator = BibtexGenerator(api_key=api_key)
+    bibtex, paper = generator.fetch_by_paper_id(paper_id)
+
+    if not bibtex or not paper:
+        console.print(f"[bold red]Error:[/] Paper not found: {paper_id}")
+        raise typer.Exit(1)
+
+    console.print(f"\n[bold green]Found:[/] {paper.title}")
+    console.print(f"[dim]Authors:[/] {', '.join(paper.authors)}")
+    console.print(f"[dim]Year:[/] {paper.year} | [dim]Venue:[/] {paper.venue or 'N/A'}")
+    console.print()
+    console.print(bibtex)
+
+
+@app.command()
+def search(
+    query: Annotated[
+        str,
+        typer.Argument(
+            help="Search query: paper title or keywords.",
+        ),
+    ],
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit",
+            "-l",
+            help="Maximum number of results.",
+        ),
+    ] = 5,
+    api_key: Annotated[
+        str | None,
+        typer.Option(
+            "--api-key",
+            "-k",
+            envvar="SEMANTIC_SCHOLAR_API_KEY",
+            help="Semantic Scholar API key for higher rate limits.",
+        ),
+    ] = None,
+) -> None:
+    """Search papers by title/keywords and generate bibtex.
+
+    ⚠️  WARNING: Search results may not match your intended paper.
+    Always verify the returned bibtex before using.
+
+    Examples:
+        bibtools search "Attention Is All You Need"
+        bibtools search "diffusion policy robot" --limit 3
+    """
+    console.print(
+        "\n[bold yellow]⚠️  WARNING:[/] Search results may not match your intended paper.\n"
+        "   Always verify the returned bibtex before using.\n"
+    )
+
+    generator = BibtexGenerator(api_key=api_key)
+    results = generator.search_by_query(query, limit=limit)
+
+    if not results:
+        console.print(f"[bold red]No results found for:[/] {query}")
+        raise typer.Exit(1)
+
+    console.print(f"[bold blue]Found {len(results)} result(s) for:[/] {query}\n")
+
+    for i, (bibtex, paper) in enumerate(results, 1):
+        venue_short = paper.get_venue_short() or "N/A"
+        console.print(f"[bold cyan]#{i}[/] {paper.title} ({paper.year}, {venue_short})\n")
+        console.print(bibtex)
+        console.print()
+
+
+def _print_actionable_results(report) -> None:
+    """Print all actionable results (failures, warnings, fixes, auto-found).
+
+    Always shows:
+    - Failed entries with mismatch details
+    - Warnings (entries with no paper_id)
+    - Fixed entries with what was changed
+    - Auto-found paper_ids that will be written
+    """
+    # 1. Failures (field mismatches)
+    failed_with_mismatches = [r for r in report.results if r.mismatches and not r.success and not r.fixed]
+    if failed_with_mismatches:
+        console.print("\n[bold red]✗ Field Mismatches:[/]")
+        for result in failed_with_mismatches:
+            console.print(f"\n  [cyan]{result.entry_key}[/]:")
+            for mismatch in result.mismatches:
+                sim_str = f" (similarity: {mismatch.similarity:.0%})" if mismatch.similarity else ""
+                console.print(f"    [red]{mismatch.field_name}[/]{sim_str}")
+                console.print(f"      bibtex: {' '.join(mismatch.bibtex_value.split())}")
+                console.print(f"      Semantic Scholar: {' '.join(mismatch.semantic_scholar_value.split())}")
+
+    # 2. Other failures (paper not found, API errors)
+    other_failures = [
+        r
+        for r in report.results
+        if not r.success and not r.mismatches and not r.no_paper_id and not r.already_verified
+    ]
+    if other_failures:
+        console.print("\n[bold red]✗ Errors:[/]")
+        for result in other_failures:
+            console.print(f"  [cyan]{result.entry_key}[/]: {result.message}")
+
+    # 3. Warnings (no paper_id)
+    no_paper_id = [r for r in report.results if r.no_paper_id]
+    if no_paper_id:
+        console.print("\n[bold yellow]⚠ No paper_id (add doi/eprint or verification comment):[/]")
+        for result in no_paper_id:
+            console.print(f"  [cyan]{result.entry_key}[/]")
+
+    # 4. Warnings from successful entries (e.g., LaTeX braces, case differences)
+    entries_with_warnings = [r for r in report.results if r.warnings and r.success]
+    if entries_with_warnings:
+        console.print("\n[bold yellow]⚠ Warnings (format differs - verified but check):[/]")
+        for result in entries_with_warnings:
+            console.print(f"\n  [cyan]{result.entry_key}[/]:")
+            for warning in result.warnings:
+                console.print(f"    [yellow]{warning.field_name}[/]:")
+                console.print(f"      bibtex: {warning.bibtex_value}")
+                console.print(f"      Semantic Scholar: {warning.semantic_scholar_value}")
+
+    # 5. Fixed entries
+    fixed_entries = [r for r in report.results if r.fixed and r.mismatches]
+    if fixed_entries:
+        console.print("\n[bold yellow]🔧 Fixed Fields:[/]")
+        for result in fixed_entries:
+            console.print(f"\n  [cyan]{result.entry_key}[/]:")
+            for mismatch in result.mismatches:
+                console.print(f"    [yellow]{mismatch.field_name}[/]")
+                console.print(f"      [red]old:[/] {' '.join(mismatch.bibtex_value.split())}")
+                console.print(f"      [green]new:[/] {' '.join(mismatch.semantic_scholar_value.split())}")
+
+    # 6. Auto-found paper_ids
+    auto_found = [r for r in report.results if r.auto_found_paper_id and r.success]
+    if auto_found:
+        console.print("\n[bold magenta]📌 Auto-found paper_id (will be written to bib):[/]")
+        for result in auto_found:
+            console.print(
+                f"  [cyan]{result.entry_key}[/]: "
+                f"[magenta]{result.paper_id_used}[/] [dim](from {result.paper_id_source})[/]"
+            )
+
+
+def _print_summary(report) -> None:
+    """Print summary statistics."""
+    from .models import VerificationStatus
+
+    console.print("\n[bold]Summary:[/]")
+    console.print(f"  Total entries: {report.total_entries}")
+    console.print(f"  [green]Verified (pass): {report.verified}[/]")
+    if report.verified_with_warnings > 0:
+        console.print(f"  [yellow]Verified (warning): {report.verified_with_warnings}[/]")
+    if report.fixed > 0:
+        console.print(f"  [yellow]Fixed & verified: {report.fixed}[/]")
+    console.print(f"  [dim]Already verified: {report.already_verified}[/]")
+    if report.no_paper_id > 0:
+        console.print(f"  [yellow]No paper_id: {report.no_paper_id}[/]")
+    if report.failed > 0:
+        console.print(f"  [red]Failed: {report.failed}[/]")
+
+    # Show overall status
+    status = report.overall_status
+    if status == VerificationStatus.PASS:
+        console.print("\n[bold green]Result: PASS[/] (exit code 0)")
+    elif status == VerificationStatus.WARNING:
+        console.print("\n[bold yellow]Result: WARNING[/] (exit code 1)")
+    else:
+        console.print("\n[bold red]Result: FAIL[/] (exit code 2)")
+
+
+if __name__ == "__main__":
+    app()

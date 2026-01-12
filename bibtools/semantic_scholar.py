@@ -1,0 +1,434 @@
+"""Semantic Scholar API client for paper verification."""
+
+import time
+
+import httpx
+
+from .arxiv_client import ArxivClient
+from .crossref import CrossRefClient
+from .models import BibtexEntry, PaperInfo
+from .rate_limiter import get_rate_limiter
+from .utils import format_author_bibtex_style, has_abbreviated_authors
+
+# Maximum papers per batch request (Semantic Scholar limit)
+BATCH_SIZE = 500
+
+
+class SemanticScholarClient:
+    """Client for Semantic Scholar API."""
+
+    BASE_URL = "https://api.semanticscholar.org/graph/v1"
+    # Request paperId, citationStyles.bibtex, and externalIds for DOI
+    FIELDS = "paperId,citationStyles,externalIds"
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        max_retries: int = 3,
+        use_external_apis: bool = True,
+    ):
+        """Initialize the client.
+
+        Args:
+            api_key: Optional API key for higher rate limits (1 req/sec vs 100 req/5min).
+            max_retries: Maximum number of retries on rate limit errors.
+            use_external_apis: Whether to use CrossRef/arXiv APIs to get full author names.
+        """
+        self.api_key = api_key
+        self.max_retries = max_retries
+        self.use_external_apis = use_external_apis
+        self._rate_limiter = get_rate_limiter(api_key)
+        self._http_client: httpx.Client | None = None
+        self._crossref_client: CrossRefClient | None = None
+        self._arxiv_client: ArxivClient | None = None
+
+    def _get_http_client(self) -> httpx.Client:
+        """Get or create HTTP client with connection pooling."""
+        if self._http_client is None or self._http_client.is_closed:
+            self._http_client = httpx.Client(
+                timeout=30.0,
+                headers=self._get_headers(),
+                http2=True,
+            )
+        return self._http_client
+
+    def close(self) -> None:
+        """Close the HTTP client."""
+        if self._http_client is not None and not self._http_client.is_closed:
+            self._http_client.close()
+            self._http_client = None
+        if self._crossref_client is not None:
+            self._crossref_client.close()
+            self._crossref_client = None
+
+    def __del__(self) -> None:
+        """Ensure HTTP client is closed on garbage collection."""
+        self.close()
+
+    def __enter__(self) -> "SemanticScholarClient":
+        return self
+
+    def __exit__(self, *args) -> None:
+        self.close()
+
+    def _get_headers(self) -> dict[str, str]:
+        """Get request headers."""
+        headers = {"Accept": "application/json"}
+        if self.api_key:
+            headers["x-api-key"] = self.api_key
+        return headers
+
+    def _get_crossref_client(self) -> CrossRefClient:
+        """Get or create CrossRef client."""
+        if self._crossref_client is None:
+            self._crossref_client = CrossRefClient()
+        return self._crossref_client
+
+    def _get_arxiv_client(self) -> ArxivClient:
+        """Get or create arXiv client."""
+        if self._arxiv_client is None:
+            self._arxiv_client = ArxivClient()
+        return self._arxiv_client
+
+    def _parse_paper(self, data: dict) -> PaperInfo | None:
+        """Parse API response into PaperInfo.
+
+        Args:
+            data: API response dictionary.
+
+        Returns:
+            PaperInfo or None if parsing fails.
+        """
+        if not data:
+            return None
+
+        paper_id = data.get("paperId", "")
+        if not paper_id:
+            return None
+
+        citation_styles = data.get("citationStyles", {}) or {}
+        raw_bibtex = citation_styles.get("bibtex", "") or ""
+
+        bibtex = BibtexEntry.from_raw_bibtex(raw_bibtex)
+        if not bibtex:
+            # Bibtex parsing failed - cannot create valid PaperInfo
+            return None
+
+        # Extract external IDs for author enhancement
+        external_ids = data.get("externalIds", {}) or {}
+        doi = external_ids.get("DOI")
+        arxiv_id = external_ids.get("ArXiv")
+
+        # Enhance author names using external APIs
+        if bibtex.authors:
+            enhanced = self._enhance_authors(bibtex, doi, arxiv_id)
+            if enhanced is None:
+                # Author enhancement failed - abbreviated names remain
+                return None
+            bibtex = enhanced
+
+        return PaperInfo(paper_id=paper_id, bibtex=bibtex)
+
+    def _enhance_authors(self, bibtex: BibtexEntry, doi: str | None, arxiv_id: str | None) -> BibtexEntry | None:
+        """Enhance author names using external APIs.
+
+        Priority: CrossRef (via DOI) > arXiv API > format only
+
+        Args:
+            bibtex: Original BibtexEntry with authors.
+            doi: DOI if available.
+            arxiv_id: arXiv ID if available.
+
+        Returns:
+            BibtexEntry with enhanced author names, or None if abbreviated names remain.
+        """
+        if not self.use_external_apis:
+            bibtex.authors = self._format_authors_bibtex_style(bibtex.authors)
+            if has_abbreviated_authors(bibtex.authors):
+                return None
+            return bibtex
+
+        # Check if enhancement is needed
+        if not has_abbreviated_authors(bibtex.authors):
+            bibtex.authors = self._format_authors_bibtex_style(bibtex.authors)
+            return bibtex
+
+        original_authors = bibtex.authors.copy()
+
+        # Try CrossRef first (most reliable for published papers)
+        if doi:
+            new_authors = self._fetch_crossref_authors(doi)
+            if new_authors and self._validate_authors(original_authors, new_authors):
+                bibtex.authors = [format_author_bibtex_style(a["given"], a["family"]) for a in new_authors]
+                if not has_abbreviated_authors(bibtex.authors):
+                    return bibtex
+
+        # Try arXiv API (for preprints)
+        if arxiv_id:
+            new_authors = self._fetch_arxiv_authors(arxiv_id)
+            if new_authors and self._validate_authors(original_authors, new_authors):
+                bibtex.authors = [format_author_bibtex_style(a["given"], a["family"]) for a in new_authors]
+                if not has_abbreviated_authors(bibtex.authors):
+                    return bibtex
+
+        # All enhancement attempts failed or still have abbreviated names
+        return None
+
+    def _fetch_crossref_authors(self, doi: str) -> list[dict[str, str]] | None:
+        """Fetch author names from CrossRef.
+
+        Args:
+            doi: DOI to lookup.
+
+        Returns:
+            List of author dicts with 'given' and 'family' keys, or None if failed.
+        """
+        crossref = self._get_crossref_client()
+        return crossref.get_authors_by_doi(doi)
+
+    def _fetch_arxiv_authors(self, arxiv_id: str) -> list[dict[str, str]] | None:
+        """Fetch author names from arXiv.
+
+        Args:
+            arxiv_id: arXiv ID to lookup.
+
+        Returns:
+            List of author dicts with 'given' and 'family' keys, or None if failed.
+        """
+        arxiv_client = self._get_arxiv_client()
+        return arxiv_client.get_authors_by_arxiv_id(arxiv_id)
+
+    def _validate_authors(self, original: list[str], new_authors: list[dict[str, str]]) -> bool:
+        """Validate that new authors match original authors.
+
+        Checks that:
+        1. Author count is the same
+        2. Family names match (case-insensitive) in the same order
+
+        Args:
+            original: Original author name strings.
+            new_authors: New author dicts with 'given' and 'family' keys.
+
+        Returns:
+            True if validation passes, False otherwise.
+        """
+        if len(original) != len(new_authors):
+            return False
+
+        for orig_author, new_author in zip(original, new_authors):
+            orig_family = self._extract_family_name(orig_author)
+            new_family = new_author.get("family", "")
+
+            if orig_family.lower() != new_family.lower():
+                return False
+
+        return True
+
+    def _extract_family_name(self, author: str) -> str:
+        """Extract family name from an author string.
+
+        Handles both "Firstname Lastname" and "Lastname, Firstname" formats.
+
+        Args:
+            author: Full author name string.
+
+        Returns:
+            Family name portion.
+        """
+        author = " ".join(author.split())  # Normalize whitespace
+
+        if "," in author:
+            # "Lastname, Firstname" format
+            return author.split(",", 1)[0].strip()
+        else:
+            # "Firstname Lastname" format - last word is family name
+            parts = author.rsplit(None, 1)
+            return parts[-1].strip() if parts else author
+
+    def _format_authors_bibtex_style(self, authors: list[str]) -> list[str]:
+        """Format author names to bibtex style (Lastname, Firstname).
+
+        Args:
+            authors: List of author names in any format.
+
+        Returns:
+            List of author names in "Lastname, Firstname" format.
+        """
+        result = []
+        for author in authors:
+            author = " ".join(author.split())  # Normalize whitespace
+            if "," in author:
+                # Already in "Lastname, Firstname" format
+                result.append(author)
+            else:
+                # "Firstname Lastname" -> "Lastname, Firstname"
+                parts = author.rsplit(None, 1)
+                if len(parts) == 2:
+                    result.append(f"{parts[1]}, {parts[0]}")
+                else:
+                    result.append(author)
+        return result
+
+    def _request_with_retry(
+        self,
+        method: str,
+        url: str,
+        **kwargs,
+    ) -> httpx.Response:
+        """Make a request with retry logic for rate limiting.
+
+        Args:
+            method: HTTP method.
+            url: URL to request.
+            **kwargs: Additional arguments for httpx.
+
+        Returns:
+            Response object.
+        """
+        last_error = None
+        client = self._get_http_client()
+
+        for attempt in range(self.max_retries):
+            try:
+                # Use rate limiter to execute the request
+                response = self._rate_limiter.execute(lambda: client.request(method, url, **kwargs))
+
+                if response.status_code == 429:
+                    # Rate limited - wait longer and retry
+                    wait_time = (attempt + 1) * 10  # 10s, 20s, 30s
+                    time.sleep(wait_time)
+                    last_error = httpx.HTTPStatusError(
+                        f"Rate limited (attempt {attempt + 1}/{self.max_retries})",
+                        request=response.request,
+                        response=response,
+                    )
+                    continue
+                response.raise_for_status()
+                return response
+            except httpx.HTTPError as e:
+                last_error = e
+                if attempt < self.max_retries - 1:
+                    time.sleep((attempt + 1) * 5)
+                    continue
+                raise
+
+        if last_error:
+            raise ConnectionError(f"Failed after {self.max_retries} retries: {last_error}") from last_error
+        raise ConnectionError("Request failed with unknown error")
+
+    def search_by_title(self, title: str, limit: int = 5) -> list[PaperInfo]:
+        """Search for papers by title.
+
+        Args:
+            title: Paper title to search for.
+            limit: Maximum number of results.
+
+        Returns:
+            List of matching papers (papers with abbreviated authors are excluded).
+        """
+        clean_title = title.replace("{", "").replace("}", "").replace("$", "")
+
+        params = {
+            "query": clean_title,
+            "limit": limit,
+            "fields": self.FIELDS,
+        }
+
+        try:
+            response = self._request_with_retry(
+                "GET",
+                f"{self.BASE_URL}/paper/search",
+                params=params,
+            )
+            data = response.json()
+            papers = data.get("data", []) or []
+            results = []
+            for p in papers:
+                paper = self._parse_paper(p)
+                if paper:
+                    results.append(paper)
+            return results
+        except httpx.HTTPError as e:
+            raise ConnectionError(f"Failed to search Semantic Scholar: {e}") from e
+
+    def get_paper(self, paper_id: str) -> PaperInfo | None:
+        """Get paper by any Semantic Scholar paper ID format.
+
+        Args:
+            paper_id: Paper identifier (ARXIV:id, DOI:doi, CorpusId:id, etc.)
+
+        Returns:
+            Paper info if found, None otherwise.
+        """
+        try:
+            response = self._request_with_retry(
+                "GET",
+                f"{self.BASE_URL}/paper/{paper_id}",
+                params={"fields": self.FIELDS},
+            )
+            return self._parse_paper(response.json())
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return None
+            raise ConnectionError(f"Failed to get paper from Semantic Scholar: {e}") from e
+        except httpx.HTTPError as e:
+            raise ConnectionError(f"Failed to get paper from Semantic Scholar: {e}") from e
+
+    def get_papers_batch(self, paper_ids: list[str]) -> dict[str, PaperInfo | None]:
+        """Get multiple papers in a single batch request.
+
+        Uses the /paper/batch endpoint to fetch up to 500 papers at once.
+        Automatically splits into multiple requests if more than 500 IDs.
+
+        Args:
+            paper_ids: List of paper identifiers (ARXIV:id, DOI:doi, etc.)
+
+        Returns:
+            Dictionary mapping paper_id to PaperInfo (or None if not found).
+        """
+        if not paper_ids:
+            return {}
+
+        results: dict[str, PaperInfo | None] = {}
+
+        # Process in batches of BATCH_SIZE (500)
+        for i in range(0, len(paper_ids), BATCH_SIZE):
+            batch = paper_ids[i : i + BATCH_SIZE]
+            batch_results = self._get_papers_batch_single(batch)
+            results.update(batch_results)
+
+        return results
+
+    def _get_papers_batch_single(self, paper_ids: list[str]) -> dict[str, PaperInfo | None]:
+        """Get a single batch of papers (max 500).
+
+        Args:
+            paper_ids: List of paper identifiers (max 500).
+
+        Returns:
+            Dictionary mapping paper_id to PaperInfo (or None if not found).
+        """
+        if not paper_ids:
+            return {}
+
+        try:
+            response = self._request_with_retry(
+                "POST",
+                f"{self.BASE_URL}/paper/batch",
+                params={"fields": self.FIELDS},
+                json={"ids": paper_ids},
+            )
+            data = response.json()
+
+            # Response is a list in the same order as input IDs
+            # None values indicate papers not found
+            results: dict[str, PaperInfo | None] = {}
+            for paper_id, paper_data in zip(paper_ids, data, strict=True):
+                if paper_data is None:
+                    results[paper_id] = None
+                else:
+                    results[paper_id] = self._parse_paper(paper_data)
+
+            return results
+        except httpx.HTTPError as e:
+            raise ConnectionError(f"Failed to batch get papers from Semantic Scholar: {e}") from e
