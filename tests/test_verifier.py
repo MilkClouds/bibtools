@@ -232,7 +232,7 @@ class TestFieldMismatchDetection:
         verifier = BibVerifier(skip_verified=True)
         entry = {"year": "2023"}
         paper_info = make_paper(paper_id="1", title="Test", year=2024)
-        mismatches, warnings = verifier._check_field_mismatches(entry, paper_info)
+        mismatches, warnings = verifier._check_field_mismatches(entry, paper_info, "CorpusId:1")
         assert any(m.field_name == "year" for m in mismatches)
 
     def test_check_year_match(self, make_paper):
@@ -240,7 +240,7 @@ class TestFieldMismatchDetection:
         verifier = BibVerifier(skip_verified=True)
         entry = {"year": "2024"}
         paper_info = make_paper(paper_id="1", title="Test", year=2024)
-        mismatches, _ = verifier._check_field_mismatches(entry, paper_info)
+        mismatches, _ = verifier._check_field_mismatches(entry, paper_info, "CorpusId:1")
         assert not any(m.field_name == "year" for m in mismatches)
 
     def test_check_venue_mismatch(self, make_paper):
@@ -248,7 +248,7 @@ class TestFieldMismatchDetection:
         verifier = BibVerifier(skip_verified=True)
         entry = {"journal": "Nature"}
         paper_info = make_paper(paper_id="1", title="Test", venue="Science")
-        mismatches, _ = verifier._check_field_mismatches(entry, paper_info)
+        mismatches, _ = verifier._check_field_mismatches(entry, paper_info, "CorpusId:1")
         assert any(m.field_name == "venue" for m in mismatches)
 
     def test_check_venue_match_alias(self, make_paper):
@@ -256,7 +256,7 @@ class TestFieldMismatchDetection:
         verifier = BibVerifier(skip_verified=True)
         entry = {"booktitle": "CoRL"}
         paper_info = make_paper(paper_id="1", title="Test", venue="Conference on Robot Learning")
-        mismatches, _ = verifier._check_field_mismatches(entry, paper_info)
+        mismatches, _ = verifier._check_field_mismatches(entry, paper_info, "CorpusId:1")
         # Should not fail because "CoRL" is an alias for "Conference on Robot Learning"
         assert not any(m.field_name == "venue" for m in mismatches)
 
@@ -265,7 +265,7 @@ class TestFieldMismatchDetection:
         verifier = BibVerifier(skip_verified=True)
         entry = {"title": "A Completely Different Title"}
         paper_info = make_paper(paper_id="1", title="Original Paper Title")
-        mismatches, _ = verifier._check_field_mismatches(entry, paper_info)
+        mismatches, _ = verifier._check_field_mismatches(entry, paper_info, "CorpusId:1")
         assert any(m.field_name == "title" for m in mismatches)
 
     def test_check_title_exact_match_pass(self, make_paper):
@@ -273,7 +273,7 @@ class TestFieldMismatchDetection:
         verifier = BibVerifier(skip_verified=True)
         entry = {"title": "CNN for NLP"}
         paper_info = make_paper(paper_id="1", title="CNN for NLP")
-        mismatches, warnings = verifier._check_field_mismatches(entry, paper_info)
+        mismatches, warnings = verifier._check_field_mismatches(entry, paper_info, "CorpusId:1")
         assert not any(m.field_name == "title" for m in mismatches)  # No mismatch
         assert not any(w.field_name == "title" for w in warnings)  # No warning - exact match
 

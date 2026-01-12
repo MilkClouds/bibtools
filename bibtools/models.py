@@ -205,11 +205,12 @@ class PaperInfo:
 
 @dataclass
 class FieldMismatch:
-    """Information about a field mismatch between bibtex and Semantic Scholar."""
+    """Information about a field mismatch between bibtex and fetched source."""
 
     field_name: str
     bibtex_value: str
-    semantic_scholar_value: str
+    fetched_value: str  # From CrossRef/arXiv/S2
+    source: str = ""  # "crossref", "arxiv", or "S2"
     similarity: float | None = None  # For title comparison
     is_warning: bool = False  # True if only differs by LaTeX braces (not a hard error)
 

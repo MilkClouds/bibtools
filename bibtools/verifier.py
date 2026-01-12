@@ -191,7 +191,7 @@ class BibVerifier:
             )
 
         # Verify title, authors, year, venue match
-        mismatches, warnings = self._check_field_mismatches(entry, paper_info)
+        mismatches, warnings = self._check_field_mismatches(entry, paper_info, paper_id)
         if mismatches:
             # If fix_mismatches is enabled, mark as fixable instead of failed
             if self.fix_mismatches:
@@ -243,9 +243,9 @@ class BibVerifier:
         )
 
     def _check_field_mismatches(
-        self, entry: dict, paper_info: PaperInfo
+        self, entry: dict, paper_info: PaperInfo, paper_id: str
     ) -> tuple[list[FieldMismatch], list[FieldMismatch]]:
-        """Check for mismatches between bibtex entry and Semantic Scholar data.
+        """Check for mismatches between bibtex entry and fetched data.
 
         Strict matching: only exact string match is PASS.
         - Exact match: PASS
@@ -254,13 +254,21 @@ class BibVerifier:
 
         Args:
             entry: Bibtex entry dictionary.
-            paper_info: Paper information from Semantic Scholar.
+            paper_info: Paper information from API.
+            paper_id: Paper identifier (used to determine source).
 
         Returns:
             Tuple of (mismatches, warnings).
             - mismatches: Hard errors (FAIL).
             - warnings: Soft issues (WARNING).
         """
+        # Determine source from paper_id
+        if paper_id.upper().startswith("DOI:"):
+            source = "crossref"
+        elif paper_id.upper().startswith("ARXIV:"):
+            source = "arxiv"
+        else:
+            source = "S2"
         mismatches = []
         warnings = []
 
@@ -273,7 +281,8 @@ class BibVerifier:
                     FieldMismatch(
                         field_name="title",
                         bibtex_value=bib_title,
-                        semantic_scholar_value=paper_info.title,
+                        fetched_value=paper_info.title,
+                        source=source,
                         similarity=title_similarity(bib_title, paper_info.title),
                         is_warning=False,
                     )
@@ -283,7 +292,8 @@ class BibVerifier:
                     FieldMismatch(
                         field_name="title",
                         bibtex_value=bib_title,
-                        semantic_scholar_value=paper_info.title,
+                        fetched_value=paper_info.title,
+                        source=source,
                         is_warning=True,
                     )
                 )
@@ -291,14 +301,15 @@ class BibVerifier:
         # Check authors
         bib_author_field = entry.get("author", "")
         if bib_author_field and paper_info.authors:
-            ss_author_str = " and ".join(paper_info.authors)
+            api_author_str = " and ".join(paper_info.authors)
             match, warning_only = compare_authors(bib_author_field, paper_info.authors)
             if not match:
                 mismatches.append(
                     FieldMismatch(
                         field_name="author",
                         bibtex_value=bib_author_field,
-                        semantic_scholar_value=ss_author_str,
+                        fetched_value=api_author_str,
+                        source=source,
                         is_warning=False,
                     )
                 )
@@ -307,7 +318,8 @@ class BibVerifier:
                     FieldMismatch(
                         field_name="author",
                         bibtex_value=bib_author_field,
-                        semantic_scholar_value=ss_author_str,
+                        fetched_value=api_author_str,
+                        source=source,
                         is_warning=True,
                     )
                 )
@@ -322,7 +334,8 @@ class BibVerifier:
                         FieldMismatch(
                             field_name="year",
                             bibtex_value=str(bib_year_int),
-                            semantic_scholar_value=str(paper_info.year),
+                            fetched_value=str(paper_info.year),
+                            source=source,
                         )
                     )
             except ValueError:
@@ -337,7 +350,8 @@ class BibVerifier:
                     FieldMismatch(
                         field_name="venue",
                         bibtex_value=bib_venue,
-                        semantic_scholar_value=paper_info.venue,
+                        fetched_value=paper_info.venue,
+                        source=source,
                         is_warning=False,
                     )
                 )
@@ -346,7 +360,8 @@ class BibVerifier:
                     FieldMismatch(
                         field_name="venue",
                         bibtex_value=bib_venue,
-                        semantic_scholar_value=paper_info.venue,
+                        fetched_value=paper_info.venue,
+                        source=source,
                         is_warning=True,
                     )
                 )
@@ -530,7 +545,7 @@ class BibVerifier:
             )
 
         # Verify title, authors, year, venue match
-        mismatches, warnings = self._check_field_mismatches(entry, paper_info)
+        mismatches, warnings = self._check_field_mismatches(entry, paper_info, paper_id)
         if mismatches:
             if self.fix_mismatches:
                 return VerificationResult(
@@ -665,7 +680,7 @@ class BibVerifier:
 
         for mismatch in mismatches:
             field_name = mismatch.field_name
-            new_value = mismatch.semantic_scholar_value
+            new_value = mismatch.fetched_value
 
             if field_name == "title":
                 # Replace title field

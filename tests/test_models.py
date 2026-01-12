@@ -116,7 +116,7 @@ class TestVerificationReport:
             entry_key="test2024",
             success=True,
             message="Verified with warning",
-            warnings=[FieldMismatch(field_name="title", bibtex_value="test", semantic_scholar_value="Test")],
+            warnings=[FieldMismatch(field_name="title", bibtex_value="test", fetched_value="Test", source="S2")],
         )
         report.add_result(result)
         assert report.total_entries == 1
@@ -138,7 +138,7 @@ class TestVerificationStatus:
             entry_key="test",
             success=True,
             message="OK",
-            warnings=[FieldMismatch(field_name="title", bibtex_value="a", semantic_scholar_value="A")],
+            warnings=[FieldMismatch(field_name="title", bibtex_value="a", fetched_value="A", source="S2")],
         )
         assert result.status == VerificationStatus.WARNING
 
@@ -153,7 +153,9 @@ class TestVerificationStatus:
             entry_key="test",
             success=False,
             message="Mismatch",
-            mismatches=[FieldMismatch(field_name="year", bibtex_value="2023", semantic_scholar_value="2024")],
+            mismatches=[
+                FieldMismatch(field_name="year", bibtex_value="2023", fetched_value="2024", source="crossref")
+            ],
         )
         assert result.status == VerificationStatus.FAIL
 
@@ -163,7 +165,9 @@ class TestVerificationStatus:
             entry_key="test",
             success=True,
             message="Fixed",
-            mismatches=[FieldMismatch(field_name="year", bibtex_value="2023", semantic_scholar_value="2024")],
+            mismatches=[
+                FieldMismatch(field_name="year", bibtex_value="2023", fetched_value="2024", source="crossref")
+            ],
             fixed=True,
         )
         assert result.status == VerificationStatus.PASS
@@ -189,7 +193,7 @@ class TestVerificationReportOverallStatus:
                 entry_key="b",
                 success=True,
                 message="OK",
-                warnings=[FieldMismatch(field_name="title", bibtex_value="a", semantic_scholar_value="A")],
+                warnings=[FieldMismatch(field_name="title", bibtex_value="a", fetched_value="A", source="S2")],
             )
         )
         assert report.overall_status == VerificationStatus.WARNING

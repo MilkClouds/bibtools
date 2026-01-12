@@ -317,8 +317,8 @@ def _print_actionable_results(report) -> None:
             for mismatch in result.mismatches:
                 sim_str = f" (similarity: {mismatch.similarity:.0%})" if mismatch.similarity else ""
                 console.print(f"    [red]{mismatch.field_name}[/]{sim_str}")
-                console.print(f"      bibtex: {' '.join(mismatch.bibtex_value.split())}")
-                console.print(f"      Semantic Scholar: {' '.join(mismatch.semantic_scholar_value.split())}")
+                console.print(f"      yours:    {' '.join(mismatch.bibtex_value.split())}")
+                console.print(f"      {mismatch.source}: {' '.join(mismatch.fetched_value.split())}")
 
     # 2. Other failures (paper not found, API errors)
     other_failures = [
@@ -346,8 +346,8 @@ def _print_actionable_results(report) -> None:
             console.print(f"\n  [cyan]{result.entry_key}[/]:")
             for warning in result.warnings:
                 console.print(f"    [yellow]{warning.field_name}[/]:")
-                console.print(f"      bibtex: {warning.bibtex_value}")
-                console.print(f"      Semantic Scholar: {warning.semantic_scholar_value}")
+                console.print(f"      yours:    {warning.bibtex_value}")
+                console.print(f"      {warning.source}: {warning.fetched_value}")
 
     # 5. Fixed entries
     fixed_entries = [r for r in report.results if r.fixed and r.mismatches]
@@ -356,9 +356,9 @@ def _print_actionable_results(report) -> None:
         for result in fixed_entries:
             console.print(f"\n  [cyan]{result.entry_key}[/]:")
             for mismatch in result.mismatches:
-                console.print(f"    [yellow]{mismatch.field_name}[/]")
+                console.print(f"    [yellow]{mismatch.field_name}[/] (from {mismatch.source})")
                 console.print(f"      [red]old:[/] {' '.join(mismatch.bibtex_value.split())}")
-                console.print(f"      [green]new:[/] {' '.join(mismatch.semantic_scholar_value.split())}")
+                console.print(f"      [green]new:[/] {' '.join(mismatch.fetched_value.split())}")
 
     # 6. Auto-found paper_ids
     auto_found = [r for r in report.results if r.auto_found_paper_id and r.success]
