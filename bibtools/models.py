@@ -7,6 +7,28 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 
 
+@dataclass
+class PaperMetadata:
+    """Unified paper metadata from CrossRef or arXiv."""
+
+    title: str
+    authors: list[dict[str, str]]  # [{'given': 'John', 'family': 'Doe'}, ...]
+    year: int | None
+    venue: str | None
+    doi: str | None = None
+    arxiv_id: str | None = None
+    source: str = ""  # "crossref" or "arxiv"
+
+
+@dataclass
+class SourceDiscrepancy:
+    """Discrepancy between CrossRef and Semantic Scholar."""
+
+    field: str
+    crossref_value: str
+    ss_value: str
+
+
 class VerificationStatus(IntEnum):
     """Verification status for an entry or overall report.
 

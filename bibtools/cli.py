@@ -215,18 +215,32 @@ def fetch(
         bibtools fetch ARXIV:2106.15928
         bibtools fetch "DOI:10.18653/v1/N18-3011"
     """
-    generator = BibtexGenerator(api_key=api_key)
-    bibtex, paper = generator.fetch_by_paper_id(paper_id)
+    from .crossref import CrossRefError
 
-    if not bibtex or not paper:
+    generator = BibtexGenerator(api_key=api_key)
+    try:
+        result = generator.fetch_by_paper_id(paper_id)
+    except CrossRefError as e:
+        console.print(f"[bold red]Error:[/] {e}")
+        raise typer.Exit(1)
+    finally:
+        generator.close()
+
+    if not result:
         console.print(f"[bold red]Error:[/] Paper not found: {paper_id}")
         raise typer.Exit(1)
 
-    console.print(f"\n[bold green]Found:[/] {paper.title}")
-    console.print(f"[dim]Authors:[/] {', '.join(paper.authors)}")
-    console.print(f"[dim]Year:[/] {paper.year} | [dim]Venue:[/] {paper.venue or 'N/A'}")
+    meta = result.metadata
+    authors_str = ", ".join(f"{a['given']} {a['family']}" for a in meta.authors[:3])
+    if len(meta.authors) > 3:
+        authors_str += f" et al. ({len(meta.authors)} authors)"
+
+    console.print(f"\n[bold green]Found:[/] {meta.title}")
+    console.print(f"[dim]Source:[/] {meta.source} | [dim]Year:[/] {meta.year}")
+    console.print(f"[dim]Venue:[/] {meta.venue or 'N/A'}")
+    console.print(f"[dim]Authors:[/] {authors_str}")
     console.print()
-    console.print(bibtex)
+    console.print(result.bibtex)
 
 
 @app.command()

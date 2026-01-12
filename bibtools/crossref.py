@@ -1,10 +1,22 @@
-"""CrossRef API client for author name resolution."""
+"""CrossRef API client for paper metadata."""
 
 import time
+from dataclasses import dataclass
 
 import httpx
 
 from .rate_limiter import RateLimiter
+
+
+@dataclass
+class CrossRefMetadata:
+    """Paper metadata from CrossRef."""
+
+    title: str
+    authors: list[dict[str, str]]  # [{'given': 'John', 'family': 'Doe'}, ...]
+    venue: str | None
+    year: int | None
+    doi: str
 
 
 class CrossRefClient:
@@ -106,3 +118,70 @@ class CrossRefClient:
                     continue
 
         return None
+
+    def get_paper_metadata(self, doi: str) -> CrossRefMetadata | None:
+        """Get full paper metadata by DOI.
+
+        Returns CrossRefMetadata with title, authors, venue, year.
+        Raises CrossRefError if API fails (not 404).
+        """
+        if doi.upper().startswith("DOI:"):
+            doi = doi[4:]
+
+        client = self._get_http_client()
+        request_url = f"{self.BASE_URL}/works/{doi}"
+
+        for attempt in range(self.max_retries):
+            try:
+                response = self._rate_limiter.execute(lambda url=request_url: client.get(url))
+
+                if response.status_code == 404:
+                    return None
+
+                if response.status_code == 429:
+                    time.sleep((attempt + 1) * 5)
+                    continue
+
+                response.raise_for_status()
+                data = response.json()
+                return self._parse_metadata(data.get("message", {}), doi)
+
+            except httpx.HTTPError as e:
+                if attempt < self.max_retries - 1:
+                    time.sleep((attempt + 1) * 2)
+                    continue
+                raise CrossRefError(f"Failed to fetch DOI {doi}: {e}") from e
+
+        raise CrossRefError(f"Failed to fetch DOI {doi} after {self.max_retries} retries")
+
+    def _parse_metadata(self, message: dict, doi: str) -> CrossRefMetadata:
+        """Parse CrossRef API response into CrossRefMetadata."""
+        # Title
+        titles = message.get("title", [])
+        title = titles[0] if titles else ""
+
+        # Authors
+        authors = []
+        for author in message.get("author", []):
+            if "given" in author and "family" in author:
+                authors.append({"given": author["given"], "family": author["family"]})
+
+        # Venue: container-title (journal/proceedings name)
+        containers = message.get("container-title", [])
+        venue = containers[0] if containers else None
+
+        # Year: from published or issued date
+        year = None
+        for date_field in ["published", "issued"]:
+            date_parts = message.get(date_field, {}).get("date-parts", [[]])
+            if date_parts and date_parts[0]:
+                year = date_parts[0][0]
+                break
+
+        return CrossRefMetadata(title=title, authors=authors, venue=venue, year=year, doi=doi)
+
+
+class CrossRefError(Exception):
+    """Error from CrossRef API."""
+
+    pass

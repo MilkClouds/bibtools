@@ -139,15 +139,18 @@ class TestFetchCommand:
         mock_generator = MagicMock()
         mock_generator_class.return_value = mock_generator
 
-        paper = make_paper(
-            paper_id="abc",
+        from bibtools.generator import FetchResult
+        from bibtools.models import PaperMetadata
+
+        metadata = PaperMetadata(
             title="Test Paper Title",
-            authors=["John Smith", "Jane Doe"],
+            authors=[{"given": "John", "family": "Smith"}, {"given": "Jane", "family": "Doe"}],
             year=2024,
             venue="NeurIPS",
+            source="crossref",
         )
         bibtex = "@article{smith2024test, title = {Test Paper Title}}"
-        mock_generator.fetch_by_paper_id.return_value = (bibtex, paper)
+        mock_generator.fetch_by_paper_id.return_value = FetchResult(bibtex=bibtex, metadata=metadata, discrepancies=[])
 
         result = runner.invoke(app, ["fetch", "ARXIV:2106.15928"])
         assert result.exit_code == 0
@@ -159,7 +162,7 @@ class TestFetchCommand:
         """Test fetch with paper not found."""
         mock_generator = MagicMock()
         mock_generator_class.return_value = mock_generator
-        mock_generator.fetch_by_paper_id.return_value = (None, None)
+        mock_generator.fetch_by_paper_id.return_value = None
 
         result = runner.invoke(app, ["fetch", "ARXIV:0000.00000"])
         assert result.exit_code == 1

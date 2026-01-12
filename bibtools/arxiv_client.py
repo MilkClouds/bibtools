@@ -1,6 +1,19 @@
-"""arXiv API client for author name resolution."""
+"""arXiv API client for paper metadata."""
+
+from dataclasses import dataclass
 
 import arxiv
+
+
+@dataclass
+class ArxivMetadata:
+    """Paper metadata from arXiv."""
+
+    title: str
+    authors: list[dict[str, str]]  # [{'given': 'John', 'family': 'Doe'}, ...]
+    year: int
+    arxiv_id: str
+    venue: str = "arXiv"  # Always "arXiv" for preprints
 
 
 class ArxivClient:
@@ -73,3 +86,48 @@ class ArxivClient:
             return {"given": "", "family": parts[0]}
 
         return None
+
+    def _normalize_arxiv_id(self, arxiv_id: str) -> str:
+        """Normalize arXiv ID: remove prefix and version suffix."""
+        arxiv_id = arxiv_id.upper().removeprefix("ARXIV:")
+        arxiv_id = arxiv_id.lower()
+        if "v" in arxiv_id:
+            arxiv_id = arxiv_id.rsplit("v", 1)[0]
+        return arxiv_id
+
+    def get_paper_metadata(self, arxiv_id: str) -> ArxivMetadata | None:
+        """Get full paper metadata by arXiv ID.
+
+        Returns ArxivMetadata with title, authors, year. Venue is always "arXiv".
+        """
+        normalized_id = self._normalize_arxiv_id(arxiv_id)
+
+        try:
+            search = arxiv.Search(id_list=[normalized_id])
+            results = list(self._client.results(search))
+
+            if not results:
+                return None
+
+            paper = results[0]
+            authors = []
+            for author in paper.authors:
+                parsed = self._parse_author_name(author.name.strip())
+                if parsed:
+                    authors.append(parsed)
+
+            return ArxivMetadata(
+                title=paper.title,
+                authors=authors,
+                year=paper.published.year,
+                arxiv_id=normalized_id,
+            )
+
+        except Exception:
+            return None
+
+
+class ArxivError(Exception):
+    """Error from arXiv API."""
+
+    pass

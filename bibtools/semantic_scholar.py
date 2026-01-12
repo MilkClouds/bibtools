@@ -1,6 +1,7 @@
-"""Semantic Scholar API client for paper verification."""
+"""Semantic Scholar API client for identifier resolution and paper lookup."""
 
 import time
+from dataclasses import dataclass
 
 import httpx
 
@@ -10,16 +11,24 @@ from .models import BibtexEntry, PaperInfo
 from .rate_limiter import get_rate_limiter
 from .utils import format_author_bibtex_style, has_abbreviated_authors
 
-# Maximum papers per batch request (Semantic Scholar limit)
 BATCH_SIZE = 500
 
 
+@dataclass
+class ResolvedIds:
+    """Resolved external IDs from Semantic Scholar."""
+
+    paper_id: str
+    doi: str | None
+    arxiv_id: str | None
+    venue: str | None  # SS venue for fallback (arXiv-only with published venue)
+
+
 class SemanticScholarClient:
-    """Client for Semantic Scholar API."""
+    """Client for Semantic Scholar API. Primary role: identifier resolution."""
 
     BASE_URL = "https://api.semanticscholar.org/graph/v1"
-    # Request paperId, citationStyles.bibtex, and externalIds for DOI
-    FIELDS = "paperId,citationStyles,externalIds"
+    FIELDS = "paperId,citationStyles,externalIds,venue"
 
     def __init__(
         self,
@@ -432,3 +441,81 @@ class SemanticScholarClient:
             return results
         except httpx.HTTPError as e:
             raise ConnectionError(f"Failed to batch get papers from Semantic Scholar: {e}") from e
+
+    # === Identifier Resolution Methods (New Architecture) ===
+
+    def resolve_ids(self, paper_id: str) -> ResolvedIds | None:
+        """Resolve any paper identifier to DOI/arXiv ID.
+
+        This is the primary entry point for the new architecture.
+        Returns DOI and arXiv ID for downstream metadata fetching.
+        """
+        try:
+            response = self._request_with_retry(
+                "GET",
+                f"{self.BASE_URL}/paper/{paper_id}",
+                params={"fields": "paperId,externalIds,venue"},
+            )
+            return self._parse_resolved_ids(response.json())
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return None
+            raise
+        except httpx.HTTPError:
+            return None
+
+    def resolve_ids_batch(self, paper_ids: list[str]) -> dict[str, ResolvedIds | None]:
+        """Resolve multiple paper identifiers to DOI/arXiv ID in batch."""
+        if not paper_ids:
+            return {}
+
+        results: dict[str, ResolvedIds | None] = {}
+        for i in range(0, len(paper_ids), BATCH_SIZE):
+            batch = paper_ids[i : i + BATCH_SIZE]
+            batch_results = self._resolve_ids_batch_single(batch)
+            results.update(batch_results)
+        return results
+
+    def _resolve_ids_batch_single(self, paper_ids: list[str]) -> dict[str, ResolvedIds | None]:
+        """Resolve a single batch of paper identifiers."""
+        if not paper_ids:
+            return {}
+
+        try:
+            response = self._request_with_retry(
+                "POST",
+                f"{self.BASE_URL}/paper/batch",
+                params={"fields": "paperId,externalIds,venue"},
+                json={"ids": paper_ids},
+            )
+            data = response.json()
+
+            results: dict[str, ResolvedIds | None] = {}
+            for paper_id, paper_data in zip(paper_ids, data, strict=True):
+                if paper_data is None:
+                    results[paper_id] = None
+                else:
+                    results[paper_id] = self._parse_resolved_ids(paper_data)
+            return results
+        except httpx.HTTPError:
+            return {pid: None for pid in paper_ids}
+
+    def _parse_resolved_ids(self, data: dict) -> ResolvedIds | None:
+        """Parse API response into ResolvedIds."""
+        if not data:
+            return None
+
+        paper_id = data.get("paperId", "")
+        if not paper_id:
+            return None
+
+        external_ids = data.get("externalIds", {}) or {}
+        doi = external_ids.get("DOI")
+        arxiv_id = external_ids.get("ArXiv")
+        venue = data.get("venue")
+
+        # Skip arXiv DOIs (e.g., 10.48550/arXiv.xxxx) - treat as arXiv-only
+        if doi and "arxiv" in doi.lower():
+            doi = None
+
+        return ResolvedIds(paper_id=paper_id, doi=doi, arxiv_id=arxiv_id, venue=venue)
