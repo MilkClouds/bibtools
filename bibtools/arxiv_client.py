@@ -73,4 +73,3 @@ class ArxivClient:
             return {"given": "", "family": parts[0]}
 
         return None
-
