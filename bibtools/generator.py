@@ -2,11 +2,13 @@
 
 Architecture:
 1. Semantic Scholar: Resolve identifier → DOI/arXiv ID + venue detection
-2. CrossRef: Fetch metadata if DOI exists (primary source)
-3. DBLP: Fetch metadata if venue != arXiv (title-based search)
-4. arXiv: Fetch metadata if venue == arXiv (preprints)
+2. Source selection (mutually exclusive branches):
+   - if DOI exists        → CrossRef
+   - elif venue != arXiv  → DBLP
+   - elif venue == arXiv  → arXiv
+   - else                 → FAIL
 
-Each bibtex entry uses exactly ONE source of truth - no mixing.
+Each bibtex entry uses exactly ONE source of truth - no fallback.
 """
 
 import os

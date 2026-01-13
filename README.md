@@ -20,7 +20,8 @@ Semantic Scholar → Resolve to DOI/arXiv ID + venue
     ┌─────────────────────────────────────────┐
     │ if DOI exists       → CrossRef          │
     │ elif venue != arXiv → DBLP              │
-    │ else                → arXiv             │
+    │ elif venue == arXiv → arXiv             │
+    │ else                → FAIL              │
     └─────────────────────────────────────────┘
         ↓
 Compare with existing entry → PASS / WARNING / FAIL
