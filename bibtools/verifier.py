@@ -710,27 +710,26 @@ class BibVerifier:
         return content[: match.start()] + updated_entry + content[match.end() :]
 
     def _replace_field(self, entry_text: str, field_name: str, new_value: str) -> str:
-        """Replace a field value in an entry.
+        """Replace a field value in an entry, handling nested braces."""
+        match = re.search(rf"(\s*)({re.escape(field_name)}\s*=\s*)", entry_text, re.IGNORECASE)
+        if not match:
+            return entry_text
 
-        Args:
-            entry_text: The bibtex entry text.
-            field_name: Name of the field to replace.
-            new_value: New value for the field.
+        start = match.end()
+        if start >= len(entry_text) or entry_text[start] != "{":
+            return entry_text
 
-        Returns:
-            Updated entry text.
-        """
-        # Match field = {value} or field = "value" or field = value
-        # Handle multi-line values properly
-        field_pattern = re.compile(
-            rf"(\s*)({re.escape(field_name)}\s*=\s*)(\{{[^}}]*\}}|\"[^\"]*\"|[^,\n]+)",
-            re.IGNORECASE,
-        )
-        match = field_pattern.search(entry_text)
-        if match:
-            indent = match.group(1)
-            field_prefix = match.group(2)
-            # Use braces for the new value
-            new_field = f"{indent}{field_prefix}{{{new_value}}}"
-            return entry_text[: match.start()] + new_field + entry_text[match.end() :]
-        return entry_text
+        # Find matching closing brace (handle nested braces)
+        depth, i = 1, start + 1
+        while i < len(entry_text) and depth > 0:
+            if entry_text[i] == "{":
+                depth += 1
+            elif entry_text[i] == "}":
+                depth -= 1
+            i += 1
+
+        if depth != 0:
+            return entry_text
+
+        new_field = f"{match.group(1)}{match.group(2)}{{{new_value}}}"
+        return entry_text[: match.start()] + new_field + entry_text[i:]
