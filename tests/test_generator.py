@@ -109,31 +109,24 @@ class TestBibtexGenerator:
     def test_init_with_api_key(self):
         """Test initialization with API key."""
         generator = BibtexGenerator(api_key="test_key")
-        assert generator.ss_client is not None
+        assert generator._fetcher is not None
 
     @patch.object(BibtexGenerator, "__init__", lambda self, **kwargs: None)
     def test_fetch_by_paper_id_success(self):
         """Test fetching bibtex by paper_id with new architecture."""
-        from bibtools.crossref import CrossRefMetadata
-        from bibtools.semantic_scholar import ResolvedIds
+        from bibtools.models import PaperMetadata
 
         generator = BibtexGenerator.__new__(BibtexGenerator)
-        generator.ss_client = MagicMock()
-        generator.crossref_client = MagicMock()
-        generator.dblp_client = MagicMock()
-        generator.arxiv_client = MagicMock()
+        generator._fetcher = MagicMock()
 
-        # Mock SS resolve (no venue - it's now fetched from CrossRef/DBLP/arXiv)
-        generator.ss_client.resolve_ids.return_value = ResolvedIds(
-            paper_id="abc", doi="10.1234/test", arxiv_id=None, dblp_id=None
-        )
-        # Mock CrossRef
-        generator.crossref_client.get_paper_metadata.return_value = CrossRefMetadata(
+        # Mock fetcher.fetch
+        generator._fetcher.fetch.return_value = PaperMetadata(
             title="Test Paper",
             authors=[{"given": "John", "family": "Doe"}],
             venue="Test Conference",
             year=2024,
             doi="10.1234/test",
+            source="crossref",
         )
 
         result = generator.fetch_by_paper_id("ARXIV:2106.15928")
@@ -145,8 +138,8 @@ class TestBibtexGenerator:
     def test_fetch_by_paper_id_not_found(self):
         """Test fetching non-existent paper."""
         generator = BibtexGenerator.__new__(BibtexGenerator)
-        generator.ss_client = MagicMock()
-        generator.ss_client.resolve_ids.return_value = None
+        generator._fetcher = MagicMock()
+        generator._fetcher.fetch.return_value = None
 
         result = generator.fetch_by_paper_id("ARXIV:0000.00000")
         assert result is None
@@ -155,8 +148,9 @@ class TestBibtexGenerator:
     def test_search_by_query(self, make_paper):
         """Test search by query (uses legacy flow)."""
         generator = BibtexGenerator.__new__(BibtexGenerator)
-        generator.ss_client = MagicMock()
-        generator.ss_client.search_by_title.return_value = [
+        generator._fetcher = MagicMock()
+        generator._fetcher.s2_client = MagicMock()
+        generator._fetcher.s2_client.search_by_title.return_value = [
             make_paper(paper_id="paper1", title="ML Paper", authors=["Author"], year=2024),
         ]
 

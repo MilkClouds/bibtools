@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from . import logging as log
+from . import logging as logger
 from .models import Author
 from .venue_aliases import get_canonical_venue
 
@@ -80,7 +80,7 @@ class DBLPClient:
             return None
 
         except httpx.HTTPError:
-            log.debug(f"DBLP HTTP error for key: {dblp_key}")
+            logger.debug(f"DBLP HTTP error for key: {dblp_key}")
             return None
 
     def search_by_title(self, title: str, venue: str | None = None) -> DBLPMetadata | None:
@@ -112,7 +112,7 @@ class DBLPClient:
                     search_venue = "NIPS"  # DBLP uses NIPS
                 query = f"{title} {search_venue}"
 
-            log.debug(f"DBLP title search: {query[:80]}...")
+            logger.debug(f"DBLP title search: {query[:80]}...")
 
             resp = self._client.get(
                 f"{self.BASE_URL}/search/publ/api",
@@ -123,7 +123,7 @@ class DBLPClient:
 
             hits = data.get("result", {}).get("hits", {}).get("hit", [])
             if not hits:
-                log.debug("DBLP title search: no results")
+                logger.debug("DBLP title search: no results")
                 return None
 
             # Find best match - prefer conference papers over arXiv
@@ -138,14 +138,14 @@ class DBLPClient:
                 # Check title similarity (case-insensitive)
                 hit_title = (info.get("title") or "").rstrip(".")
                 if self._titles_match(title, hit_title):
-                    log.debug(f"DBLP title search: found {hit_key}")
+                    logger.debug(f"DBLP title search: found {hit_key}")
                     return self._parse_info(info, hit_key)
 
-            log.debug("DBLP title search: no matching conference paper")
+            logger.debug("DBLP title search: no matching conference paper")
             return None
 
         except httpx.HTTPError:
-            log.debug(f"DBLP HTTP error for title search: {title[:50]}")
+            logger.debug(f"DBLP HTTP error for title search: {title[:50]}")
             return None
 
     def _titles_match(self, title1: str, title2: str) -> bool:

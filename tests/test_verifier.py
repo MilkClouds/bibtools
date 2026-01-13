@@ -313,7 +313,7 @@ class TestBibVerifier:
         """Test verifier initialization."""
         verifier = BibVerifier(skip_verified=True)
         assert verifier.skip_verified is True
-        assert verifier.s2_client is not None
+        assert verifier._fetcher is not None
 
     def test_verify_entry_already_verified(self):
         """Test verifying an already verified entry."""

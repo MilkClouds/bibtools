@@ -6,11 +6,8 @@ from pathlib import Path
 
 from rich.console import Console
 
-from . import logging as log
-from .arxiv_client import ArxivClient
 from .constants import AUTO_FIND_ID, AUTO_FIND_NONE, AUTO_FIND_TITLE
-from .crossref import CrossRefClient
-from .dblp import DBLPClient
+from .fetcher import MetadataFetcher
 from .models import FieldMismatch, PaperMetadata, VerificationReport, VerificationResult
 from .parser import (
     extract_paper_id_from_entry,
@@ -18,7 +15,6 @@ from .parser import (
     is_entry_verified,
     parse_bib_file,
 )
-from .semantic_scholar import SemanticScholarClient
 from .utils import (
     compare_authors,
     compare_titles,
@@ -39,38 +35,21 @@ class BibVerifier:
         fix_mismatches: bool = False,
         console: Console | None = None,
         *,
-        s2_client: SemanticScholarClient | None = None,
-        crossref_client: CrossRefClient | None = None,
-        dblp_client: DBLPClient | None = None,
-        arxiv_client: ArxivClient | None = None,
+        fetcher: MetadataFetcher | None = None,
     ):
         """Initialize the verifier.
 
         Args:
-            api_key: Optional Semantic Scholar API key. Falls back to SEMANTIC_SCHOLAR_API_KEY env var.
+            api_key: Optional Semantic Scholar API key.
             skip_verified: Skip entries that are already verified.
             max_age_days: Re-verify entries older than this many days. None = never re-verify.
-                         0 = always re-verify (equivalent to --reverify).
             auto_find_level: Level of auto-find: "none", "id", or "title".
             fix_mismatches: Automatically fix mismatched fields.
             console: Rich console for output.
-            s2_client: Optional pre-configured SemanticScholarClient (for sharing).
-            crossref_client: Optional pre-configured CrossRefClient (for sharing).
-            dblp_client: Optional pre-configured DBLPClient (for sharing).
-            arxiv_client: Optional pre-configured ArxivClient (for sharing).
+            fetcher: Optional pre-configured MetadataFetcher (for sharing).
         """
-        import os
-
-        effective_api_key = api_key or os.environ.get("SEMANTIC_SCHOLAR_API_KEY")
-        self.s2_client = s2_client or SemanticScholarClient(api_key=effective_api_key)
-        self.crossref_client = crossref_client or CrossRefClient()
-        self.dblp_client = dblp_client or DBLPClient()
-        self.arxiv_client = arxiv_client or ArxivClient()
-        # Track which clients we own (for proper cleanup)
-        self._owns_s2 = s2_client is None
-        self._owns_crossref = crossref_client is None
-        self._owns_dblp = dblp_client is None
-        self._owns_arxiv = arxiv_client is None
+        self._fetcher = fetcher or MetadataFetcher(api_key=api_key)
+        self._owns_fetcher = fetcher is None
 
         self.skip_verified = skip_verified
         self.max_age_days = max_age_days
@@ -78,93 +57,23 @@ class BibVerifier:
         self.fix_mismatches = fix_mismatches
         self.console = console or Console()
 
-        # Validate auto_find_level
         if auto_find_level not in (AUTO_FIND_NONE, AUTO_FIND_ID, AUTO_FIND_TITLE):
             raise ValueError(f"Invalid auto_find_level: {auto_find_level}")
 
     def close(self) -> None:
-        """Close owned clients only."""
-        if self._owns_s2:
-            self.s2_client.close()
-        if self._owns_crossref:
-            self.crossref_client.close()
-        if self._owns_dblp:
-            self.dblp_client.close()
-        # ArxivClient doesn't need closing (uses feedparser, no persistent connection)
+        """Close owned fetcher."""
+        if self._owns_fetcher:
+            self._fetcher.close()
 
     def __enter__(self) -> "BibVerifier":
         return self
 
-    def __exit__(self, *args) -> None:
+    def __exit__(self, *_) -> None:
         self.close()
 
     def _fetch_metadata(self, paper_id: str) -> PaperMetadata | None:
-        """Fetch paper metadata. See verify_entry for flow documentation."""
-        # Step 1: Resolve to DOI/arXiv ID + venue via S2
-        resolved = self.s2_client.resolve_ids(paper_id)
-        if not resolved:
-            log.debug(f"Paper not found in Semantic Scholar: {paper_id}")
-            return None
-
-        log.info(f"Resolved: {paper_id} | DOI={resolved.doi} | arXiv={resolved.arxiv_id} | venue={resolved.venue}")
-
-        # Case 1: DOI exists -> CrossRef
-        if resolved.doi:
-            log.info("Source: crossref (DOI exists)")
-            crossref_meta = self.crossref_client.get_paper_metadata(resolved.doi)
-            if crossref_meta:
-                return PaperMetadata(
-                    title=crossref_meta.title,
-                    authors=crossref_meta.authors,
-                    year=crossref_meta.year,
-                    venue=crossref_meta.venue,
-                    doi=crossref_meta.doi,
-                    arxiv_id=resolved.arxiv_id,
-                    source="crossref",
-                )
-            return None
-
-        # Case 2: No DOI, venue != arXiv -> DBLP
-        venue_is_arxiv = self._is_arxiv_venue(resolved.venue)
-        if not venue_is_arxiv:
-            log.info(f"Source: dblp (venue={resolved.venue})")
-            if resolved.title:
-                dblp_meta = self.dblp_client.search_by_title(resolved.title, resolved.venue)
-                if dblp_meta:
-                    return PaperMetadata(
-                        title=dblp_meta.title,
-                        authors=dblp_meta.authors,
-                        year=dblp_meta.year,
-                        venue=dblp_meta.venue,
-                        doi=dblp_meta.doi,
-                        arxiv_id=resolved.arxiv_id,
-                        source="dblp",
-                    )
-            return None
-
-        # Case 3: No DOI, venue == arXiv -> arXiv
-        if resolved.arxiv_id:
-            log.info("Source: arxiv")
-            arxiv_meta = self.arxiv_client.get_paper_metadata(resolved.arxiv_id)
-            if arxiv_meta:
-                return PaperMetadata(
-                    title=arxiv_meta.title,
-                    authors=arxiv_meta.authors,
-                    year=arxiv_meta.year,
-                    venue=arxiv_meta.venue,
-                    doi=resolved.doi,
-                    arxiv_id=arxiv_meta.arxiv_id,
-                    source="arxiv",
-                )
-
-        return None
-
-    def _is_arxiv_venue(self, venue: str | None) -> bool:
-        """Check if venue indicates arXiv preprint."""
-        if not venue:
-            return True  # No venue info, assume arXiv
-        venue_lower = venue.lower()
-        return "arxiv" in venue_lower or venue_lower in ("", "corr")
+        """Fetch paper metadata. See MetadataFetcher.fetch for flow documentation."""
+        return self._fetcher.fetch(paper_id)
 
     def _should_skip_verified(self, date_str: str | None) -> bool:
         """Determine if a verified entry should be skipped based on age.
@@ -399,7 +308,7 @@ class BibVerifier:
 
         # Search by title via S2
         try:
-            papers = self.s2_client.search_by_title(search_title, limit=3)
+            papers = self._fetcher.s2_client.search_by_title(search_title, limit=3)
         except ConnectionError:
             return None, None
 
