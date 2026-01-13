@@ -382,6 +382,18 @@ class MetadataFetcher:
         logger.info(f"Resolved: {paper_id} | DOI={resolved.doi} | arXiv={resolved.arxiv_id} | venue={resolved.venue}")
         return self._fetch_with_resolved(resolved)
 
+    def resolve_batch(self, paper_ids: list[str]) -> dict[str, ResolvedIds | None]:
+        """Resolve multiple paper IDs via S2 batch API.
+
+        This is much faster than calling resolve_ids() individually
+        since it uses a single API request for up to 500 papers.
+        """
+        return self.s2_client.resolve_ids_batch(paper_ids)
+
+    def fetch_with_resolved(self, resolved: ResolvedIds) -> PaperMetadata | None:
+        """Fetch metadata using pre-resolved IDs (public wrapper)."""
+        return self._fetch_with_resolved(resolved)
+
     def _fetch_with_resolved(self, resolved: ResolvedIds) -> PaperMetadata | None:
         # Case 1: DOI exists -> CrossRef
         if resolved.doi:

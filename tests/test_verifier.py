@@ -451,8 +451,9 @@ class TestVerifierWithMockAPI:
 
     def test_verify_entry_with_doi_success(self, make_metadata):
         """Test verify_entry successfully verifies paper via DOI."""
+        from bibtools.semantic_scholar import ResolvedIds
+
         verifier = BibVerifier(skip_verified=True, auto_find_level="id")
-        # Mock _fetch_metadata
         metadata = make_metadata(
             title="Test Paper",
             authors=["John Smith"],
@@ -460,7 +461,15 @@ class TestVerifierWithMockAPI:
             venue="NeurIPS",
             doi="10.1234/test",
         )
-        verifier._fetch_metadata = MagicMock(return_value=metadata)
+        # Mock batch resolve and fetch_with_resolved (unified path)
+        resolved = ResolvedIds(
+            paper_id="DOI:10.1234/test",
+            doi="10.1234/test",
+            arxiv_id=None,
+            dblp_id=None,
+        )
+        verifier._resolve_batch = MagicMock(return_value={"DOI:10.1234/test": resolved})
+        verifier._fetch_with_resolved = MagicMock(return_value=metadata)
 
         entry = {
             "ID": "smith2024test",
@@ -474,12 +483,20 @@ class TestVerifierWithMockAPI:
         result = verifier.verify_entry(entry, content)
         assert result.success is True
         assert result.paper_id_used == "DOI:10.1234/test"
-        verifier._fetch_metadata.assert_called_once_with("DOI:10.1234/test")
 
     def test_verify_entry_api_error(self):
         """Test verify_entry handles API error."""
+        from bibtools.semantic_scholar import ResolvedIds
+
         verifier = BibVerifier(skip_verified=True, auto_find_level="id")
-        verifier._fetch_metadata = MagicMock(side_effect=ConnectionError("API unavailable"))
+        resolved = ResolvedIds(
+            paper_id="DOI:10.1234/test",
+            doi="10.1234/test",
+            arxiv_id=None,
+            dblp_id=None,
+        )
+        verifier._resolve_batch = MagicMock(return_value={"DOI:10.1234/test": resolved})
+        verifier._fetch_with_resolved = MagicMock(side_effect=ConnectionError("API unavailable"))
 
         entry = {"ID": "test2024", "doi": "10.1234/test"}
         content = "@article{test2024}"
@@ -491,7 +508,8 @@ class TestVerifierWithMockAPI:
     def test_verify_entry_paper_not_found(self):
         """Test verify_entry when paper is not found."""
         verifier = BibVerifier(skip_verified=True, auto_find_level="id")
-        verifier._fetch_metadata = MagicMock(return_value=None)
+        # S2 batch returns None for this paper_id
+        verifier._resolve_batch = MagicMock(return_value={"DOI:10.1234/nonexistent": None})
 
         entry = {"ID": "test2024", "doi": "10.1234/nonexistent"}
         content = "@article{test2024}"
@@ -502,13 +520,22 @@ class TestVerifierWithMockAPI:
 
     def test_verify_entry_field_mismatch(self, make_metadata):
         """Test verify_entry detects field mismatch."""
+        from bibtools.semantic_scholar import ResolvedIds
+
         verifier = BibVerifier(skip_verified=True, auto_find_level="id", fix_mismatches=False)
         metadata = make_metadata(
             title="Correct Title",
             authors=["John Smith"],
             year=2025,  # Different year
         )
-        verifier._fetch_metadata = MagicMock(return_value=metadata)
+        resolved = ResolvedIds(
+            paper_id="DOI:10.1234/test",
+            doi="10.1234/test",
+            arxiv_id=None,
+            dblp_id=None,
+        )
+        verifier._resolve_batch = MagicMock(return_value={"DOI:10.1234/test": resolved})
+        verifier._fetch_with_resolved = MagicMock(return_value=metadata)
 
         entry = {
             "ID": "test2024",
@@ -525,13 +552,22 @@ class TestVerifierWithMockAPI:
 
     def test_verify_entry_fix_mode(self, make_metadata):
         """Test verify_entry with fix_mismatches=True."""
+        from bibtools.semantic_scholar import ResolvedIds
+
         verifier = BibVerifier(skip_verified=True, auto_find_level="id", fix_mismatches=True)
         metadata = make_metadata(
             title="Correct Title",
             authors=["John Smith"],
             year=2025,
         )
-        verifier._fetch_metadata = MagicMock(return_value=metadata)
+        resolved = ResolvedIds(
+            paper_id="DOI:10.1234/test",
+            doi="10.1234/test",
+            arxiv_id=None,
+            dblp_id=None,
+        )
+        verifier._resolve_batch = MagicMock(return_value={"DOI:10.1234/test": resolved})
+        verifier._fetch_with_resolved = MagicMock(return_value=metadata)
 
         entry = {
             "ID": "test2024",
@@ -548,6 +584,8 @@ class TestVerifierWithMockAPI:
 
     def test_verify_file_with_mock_success(self, tmp_path, make_metadata):
         """Test verify_file with mocked API for successful verification."""
+        from bibtools.semantic_scholar import ResolvedIds
+
         bib_content = """@article{test2024,
   doi = {10.1234/example},
   title = {Test Paper},
@@ -566,7 +604,15 @@ class TestVerifierWithMockAPI:
             venue="NeurIPS",
             doi="10.1234/example",
         )
-        verifier._fetch_metadata = MagicMock(return_value=metadata)
+        # Mock batch resolve and fetch_with_resolved for verify_file
+        resolved = ResolvedIds(
+            paper_id="DOI:10.1234/example",
+            doi="10.1234/example",
+            arxiv_id=None,
+            dblp_id=None,
+        )
+        verifier._resolve_batch = MagicMock(return_value={"DOI:10.1234/example": resolved})
+        verifier._fetch_with_resolved = MagicMock(return_value=metadata)
 
         report, updated_content = verifier.verify_file(bib_file)
 
@@ -580,6 +626,8 @@ class TestVerifierWithMockAPI:
         This is critical: only PASS results should be marked as verified.
         WARNING means the entry needs human review.
         """
+        from bibtools.semantic_scholar import ResolvedIds
+
         bib_content = """% paper_id: ARXIV:1234.5678
 @article{test2024,
   title = {test paper with lowercase},
@@ -597,7 +645,15 @@ class TestVerifierWithMockAPI:
             authors=["John Smith"],
             year=2024,
         )
-        verifier._fetch_metadata = MagicMock(return_value=metadata)
+        # Mock batch resolve and fetch_with_resolved for verify_file
+        resolved = ResolvedIds(
+            paper_id="ARXIV:1234.5678",
+            doi=None,
+            arxiv_id="1234.5678",
+            dblp_id=None,
+        )
+        verifier._resolve_batch = MagicMock(return_value={"ARXIV:1234.5678": resolved})
+        verifier._fetch_with_resolved = MagicMock(return_value=metadata)
 
         report, updated_content = verifier.verify_file(bib_file)
 
@@ -611,6 +667,8 @@ class TestVerifierWithMockAPI:
 
     def test_pass_adds_verified_comment(self, tmp_path, make_metadata):
         """Test that PASS results DO add 'verified via' comment."""
+        from bibtools.semantic_scholar import ResolvedIds
+
         bib_content = """% paper_id: ARXIV:1234.5678
 @article{test2024,
   title = {Test Paper},
@@ -628,7 +686,15 @@ class TestVerifierWithMockAPI:
             authors=["John Smith"],
             year=2024,
         )
-        verifier._fetch_metadata = MagicMock(return_value=metadata)
+        # Mock batch resolve and fetch_with_resolved for verify_file
+        resolved = ResolvedIds(
+            paper_id="ARXIV:1234.5678",
+            doi=None,
+            arxiv_id="1234.5678",
+            dblp_id=None,
+        )
+        verifier._resolve_batch = MagicMock(return_value={"ARXIV:1234.5678": resolved})
+        verifier._fetch_with_resolved = MagicMock(return_value=metadata)
 
         report, updated_content = verifier.verify_file(bib_file)
 

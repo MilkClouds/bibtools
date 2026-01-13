@@ -15,6 +15,7 @@ from .parser import (
     is_entry_verified,
     parse_bib_file,
 )
+from .semantic_scholar import ResolvedIds
 from .utils import (
     compare_authors,
     compare_titles,
@@ -71,9 +72,13 @@ class BibVerifier:
     def __exit__(self, *_) -> None:
         self.close()
 
-    def _fetch_metadata(self, paper_id: str) -> PaperMetadata | None:
-        """Fetch paper metadata. See MetadataFetcher.fetch for flow documentation."""
-        return self._fetcher.fetch(paper_id)
+    def _resolve_batch(self, paper_ids: list[str]) -> dict[str, ResolvedIds | None]:
+        """Resolve paper IDs via S2 batch API (works for single or multiple IDs)."""
+        return self._fetcher.resolve_batch(paper_ids)
+
+    def _fetch_with_resolved(self, resolved: ResolvedIds) -> PaperMetadata | None:
+        """Fetch metadata using pre-resolved IDs."""
+        return self._fetcher.fetch_with_resolved(resolved)
 
     def _should_skip_verified(self, date_str: str | None) -> bool:
         """Determine if a verified entry should be skipped based on age.
@@ -159,8 +164,10 @@ class BibVerifier:
                 no_paper_id=True,
             )
 
-        # Delegate to common verification logic
-        return self._verify_entry_with_metadata(entry, paper_id, source or "", auto_found)
+        # Use batch resolve (works for single ID too) then verify
+        resolved_map = self._resolve_batch([paper_id])
+        resolved = resolved_map.get(paper_id)
+        return self._verify_entry_with_resolved(entry, paper_id, source or "", auto_found, resolved)
 
     def _check_field_mismatches(
         self, entry: dict, metadata: PaperMetadata
@@ -385,7 +392,13 @@ class BibVerifier:
         if not entries_to_verify:
             return report, updated_content
 
-        # Verify each entry
+        # Batch resolve all paper IDs via S2 (single API call)
+        paper_ids = [paper_id for _, paper_id, _, _ in entries_to_verify]
+        if show_progress:
+            self.console.print(f"[dim]Resolving {len(paper_ids)} paper IDs...[/]")
+        resolved_map = self._resolve_batch(paper_ids)
+
+        # Verify each entry using pre-resolved IDs
         if show_progress:
             self.console.print(f"[dim]Verifying {len(entries_to_verify)} entries...[/]")
             entry_iter = tqdm(entries_to_verify, desc="Verifying", unit="entry", leave=False)
@@ -393,7 +406,8 @@ class BibVerifier:
             entry_iter = entries_to_verify
 
         for entry, paper_id, source, auto_found in entry_iter:
-            result = self._verify_entry_with_metadata(entry, paper_id, source, auto_found)
+            resolved = resolved_map.get(paper_id)
+            result = self._verify_entry_with_resolved(entry, paper_id, source, auto_found, resolved)
             report.add_result(result)
 
             # Only mark as verified if PASS (success without warnings)
@@ -407,29 +421,41 @@ class BibVerifier:
 
         return report, updated_content
 
-    def _verify_entry_with_metadata(
+    def _verify_entry_with_resolved(
         self,
         entry: dict,
         paper_id: str,
         source: str,
         auto_found: bool,
+        resolved: ResolvedIds | None,
     ) -> VerificationResult:
-        """Verify entry by fetching metadata from CrossRef/arXiv.
+        """Verify entry using pre-resolved IDs from S2 batch API.
 
         Args:
             entry: Bibtex entry dictionary.
             paper_id: Paper ID used for lookup.
             source: Source of paper_id.
             auto_found: Whether paper_id was auto-found.
+            resolved: Pre-resolved IDs from batch API.
 
         Returns:
             Verification result.
         """
         entry_key = entry.get("ID", "unknown")
 
-        # Fetch metadata from CrossRef/arXiv
+        if not resolved:
+            return VerificationResult(
+                entry_key=entry_key,
+                success=False,
+                message=f"Paper not found for {paper_id}",
+                paper_id_used=paper_id,
+                auto_found_paper_id=auto_found,
+                paper_id_source=source,
+            )
+
+        # Fetch metadata from CrossRef/DBLP/arXiv using pre-resolved IDs
         try:
-            metadata = self._fetch_metadata(paper_id)
+            metadata = self._fetch_with_resolved(resolved)
         except Exception as e:
             return VerificationResult(
                 entry_key=entry_key,
@@ -452,6 +478,21 @@ class BibVerifier:
 
         # Verify title, authors, year, venue match
         mismatches, warnings = self._check_field_mismatches(entry, metadata)
+        return self._build_verification_result(entry, paper_id, source, auto_found, metadata, mismatches, warnings)
+
+    def _build_verification_result(
+        self,
+        entry: dict,
+        paper_id: str,
+        source: str,
+        auto_found: bool,
+        metadata: PaperMetadata,
+        mismatches: list[FieldMismatch],
+        warnings: list[FieldMismatch],
+    ) -> VerificationResult:
+        """Build verification result from field comparison."""
+        entry_key = entry.get("ID", "unknown")
+
         if mismatches:
             if self.fix_mismatches:
                 return VerificationResult(
