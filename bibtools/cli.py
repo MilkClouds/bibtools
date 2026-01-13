@@ -215,7 +215,7 @@ def fetch(
         bibtools fetch ARXIV:2106.15928
         bibtools fetch "DOI:10.18653/v1/N18-3011"
     """
-    from .crossref import CrossRefError
+    from .fetcher import CrossRefError
 
     generator = BibtexGenerator(api_key=api_key)
     try:

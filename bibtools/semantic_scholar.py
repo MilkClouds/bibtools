@@ -35,10 +35,15 @@ class SemanticScholarClient:
 
     BASE_URL = "https://api.semanticscholar.org/graph/v1"
 
+    # Rate limits: with API key = 1 req/sec, without = 100 req/5min (~3 sec)
+    _RATE_LIMIT_WITH_KEY = 1.0
+    _RATE_LIMIT_NO_KEY = 3.0
+
     def __init__(self, api_key: str | None = None, max_retries: int = 3):
         self.api_key = api_key
         self.max_retries = max_retries
-        self._rate_limiter = get_rate_limiter(api_key)
+        interval = self._RATE_LIMIT_WITH_KEY if api_key else self._RATE_LIMIT_NO_KEY
+        self._rate_limiter = get_rate_limiter("semantic_scholar", interval)
         self._http_client: httpx.Client | None = None
 
     def _get_http_client(self) -> httpx.Client:

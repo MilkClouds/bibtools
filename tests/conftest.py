@@ -7,6 +7,7 @@ from typing import Callable
 import pytest
 
 from bibtools.models import PaperMetadata
+from bibtools.rate_limiter import reset_all_rate_limiters
 
 
 @pytest.fixture
@@ -41,6 +42,13 @@ def make_metadata() -> Callable[..., PaperMetadata]:
         )
 
     return _make_metadata
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limiters():
+    """Reset rate limiters before each test for isolation."""
+    reset_all_rate_limiters()
+    yield
 
 
 @pytest.fixture(autouse=True)
