@@ -620,11 +620,11 @@ class TestVerifierWithMockAPI:
         # New format: "% paper_id: {id}, verified via bibtools ({date})"
         assert "% paper_id: DOI:10.1234/example, verified via bibtools" in updated_content
 
-    def test_warning_does_not_add_verified_comment(self, tmp_path, make_metadata):
-        """Test that WARNING results do NOT add 'verified via' comment.
+    def test_warning_also_adds_verified_comment(self, tmp_path, make_metadata):
+        """Test that WARNING results also add 'verified via' comment.
 
-        This is critical: only PASS results should be marked as verified.
-        WARNING means the entry needs human review.
+        WARNING means format differs but paper is correctly identified.
+        paper_id should be written so user doesn't have to add it manually.
         """
         from bibtools.semantic_scholar import ResolvedIds
 
@@ -660,10 +660,9 @@ class TestVerifierWithMockAPI:
         # Should be a warning (case difference)
         assert report.verified_with_warnings == 1
         assert report.verified == 0
-        # CRITICAL: "verified via" should NOT be added
-        assert "verified via" not in updated_content
-        # Original comment should be preserved
-        assert "% paper_id: ARXIV:1234.5678\n" in updated_content
+        # WARNING should also add verified comment (paper is correctly identified)
+        assert "verified via" in updated_content
+        assert "% paper_id: ARXIV:1234.5678, verified via bibtools" in updated_content
 
     def test_pass_adds_verified_comment(self, tmp_path, make_metadata):
         """Test that PASS results DO add 'verified via' comment."""

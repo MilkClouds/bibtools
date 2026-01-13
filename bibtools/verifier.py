@@ -456,9 +456,8 @@ class BibVerifier:
             result = self._verify_entry_with_resolved(entry, paper_id, source, auto_found, resolved)
             report.add_result(result)
 
-            # Only mark as verified if PASS (success without warnings)
-            is_pass = result.success and not result.warnings
-            if is_pass and result.needs_update and result.metadata and result.paper_id_used:
+            # Add paper_id comment if verified (PASS or WARNING, not FAIL)
+            if result.success and result.needs_update and result.metadata and result.paper_id_used:
                 if result.fixed and result.mismatches:
                     updated_content = self._apply_field_fixes(
                         updated_content, entry, result.metadata, result.mismatches
