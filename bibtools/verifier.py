@@ -286,43 +286,37 @@ class BibVerifier:
     def _search_by_title_for_id(self, entry: dict) -> tuple[str | None, str | None]:
         """Search for paper by title and return paper_id if found with high confidence.
 
-        Uses S2 search to find a paper, then returns its paper_id for subsequent
-        metadata lookup from CrossRef/arXiv.
-
         Args:
             entry: Bibtex entry dictionary.
 
         Returns:
-            Tuple of (paper_id, source).
-            - paper_id: S2 paper ID for subsequent resolve_ids() call
-            - source: "title" if found, None otherwise
+            Tuple of (paper_id, source). source is "title" if found.
         """
         title = entry.get("title", "")
         if not title:
             return None, None
 
-        # Strip LaTeX braces for search
         from .utils import strip_latex_braces
 
         search_title = strip_latex_braces(title)
 
-        # Search by title via S2
         try:
-            papers = self._fetcher.s2_client.search_by_title(search_title, limit=3)
+            resolved_list = self._fetcher.s2_client.search_by_title(search_title, limit=3)
         except ConnectionError:
             return None, None
 
-        if not papers:
+        if not resolved_list:
             return None, None
 
         # Find best match by title similarity
         best_match = None
         best_score = 0.0
-        for paper in papers:
-            score = title_similarity(title, paper.title)
-            if score > best_score:
-                best_score = score
-                best_match = paper
+        for resolved in resolved_list:
+            if resolved.title:
+                score = title_similarity(title, resolved.title)
+                if score > best_score:
+                    best_score = score
+                    best_match = resolved
 
         if best_score >= 0.85 and best_match:
             return best_match.paper_id, "title"

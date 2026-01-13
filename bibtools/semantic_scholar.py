@@ -1,11 +1,10 @@
-"""Semantic Scholar API client for identifier resolution and paper lookup."""
+"""Semantic Scholar API client for identifier resolution."""
 
 import time
 from dataclasses import dataclass
 
 import httpx
 
-from .models import BibtexEntry, PaperInfo
 from .rate_limiter import get_rate_limiter
 
 _BATCH_SIZE = 500
@@ -28,14 +27,13 @@ class ResolvedIds:
 
 
 class SemanticScholarClient:
-    """Semantic Scholar API client.
+    """Semantic Scholar API client for identifier resolution.
 
-    Primary role: identifier resolution (paper_id → DOI/arXiv ID).
-    Secondary role: legacy paper lookup with bibtex generation.
+    Role: Resolve paper identifiers (arXiv ID, DOI, S2 ID) to external IDs
+    for downstream metadata fetching from CrossRef/DBLP/arXiv.
     """
 
     BASE_URL = "https://api.semanticscholar.org/graph/v1"
-    FIELDS = "paperId,citationStyles,externalIds,venue,title"
 
     def __init__(self, api_key: str | None = None, max_retries: int = 3):
         self.api_key = api_key
@@ -76,32 +74,6 @@ class SemanticScholarClient:
         if self.api_key:
             headers["x-api-key"] = self.api_key
         return headers
-
-    def _parse_paper(self, data: dict) -> PaperInfo | None:
-        """Parse API response into PaperInfo.
-
-        Args:
-            data: API response dictionary.
-
-        Returns:
-            PaperInfo or None if parsing fails.
-        """
-        if not data:
-            return None
-
-        paper_id = data.get("paperId", "")
-        if not paper_id:
-            return None
-
-        citation_styles = data.get("citationStyles", {}) or {}
-        raw_bibtex = citation_styles.get("bibtex", "") or ""
-
-        bibtex = BibtexEntry.from_raw_bibtex(raw_bibtex)
-        if not bibtex:
-            # Bibtex parsing failed - cannot create valid PaperInfo
-            return None
-
-        return PaperInfo(paper_id=paper_id, bibtex=bibtex)
 
     def _request_with_retry(
         self,
@@ -150,7 +122,7 @@ class SemanticScholarClient:
             raise ConnectionError(f"Failed after {self.max_retries} retries: {last_error}") from last_error
         raise ConnectionError("Request failed with unknown error")
 
-    def search_by_title(self, title: str, limit: int = 5) -> list[PaperInfo]:
+    def search_by_title(self, title: str, limit: int = 5) -> list[ResolvedIds]:
         """Search for papers by title.
 
         Args:
@@ -158,14 +130,14 @@ class SemanticScholarClient:
             limit: Maximum number of results.
 
         Returns:
-            List of matching papers.
+            List of ResolvedIds with paper info.
         """
         clean_title = title.replace("{", "").replace("}", "").replace("$", "")
 
         params = {
             "query": clean_title,
             "limit": limit,
-            "fields": self.FIELDS,
+            "fields": "paperId,externalIds,venue,title",
         }
 
         try:
@@ -178,96 +150,12 @@ class SemanticScholarClient:
             papers = data.get("data", []) or []
             results = []
             for p in papers:
-                paper = self._parse_paper(p)
-                if paper:
-                    results.append(paper)
+                resolved = self._parse_resolved_ids(p)
+                if resolved:
+                    results.append(resolved)
             return results
         except httpx.HTTPError as e:
             raise ConnectionError(f"Failed to search Semantic Scholar: {e}") from e
-
-    def get_paper(self, paper_id: str) -> PaperInfo | None:
-        """Get paper by any Semantic Scholar paper ID format.
-
-        Args:
-            paper_id: Paper identifier (ARXIV:id, DOI:doi, CorpusId:id, etc.)
-
-        Returns:
-            Paper info if found, None otherwise.
-        """
-        try:
-            response = self._request_with_retry(
-                "GET",
-                f"{self.BASE_URL}/paper/{paper_id}",
-                params={"fields": self.FIELDS},
-            )
-            return self._parse_paper(response.json())
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 404:
-                return None
-            raise ConnectionError(f"Failed to get paper from Semantic Scholar: {e}") from e
-        except httpx.HTTPError as e:
-            raise ConnectionError(f"Failed to get paper from Semantic Scholar: {e}") from e
-
-    def get_papers_batch(self, paper_ids: list[str]) -> dict[str, PaperInfo | None]:
-        """Get multiple papers in a single batch request.
-
-        Uses the /paper/batch endpoint to fetch up to 500 papers at once.
-        Automatically splits into multiple requests if more than 500 IDs.
-
-        Args:
-            paper_ids: List of paper identifiers (ARXIV:id, DOI:doi, etc.)
-
-        Returns:
-            Dictionary mapping paper_id to PaperInfo (or None if not found).
-        """
-        if not paper_ids:
-            return {}
-
-        results: dict[str, PaperInfo | None] = {}
-
-        # Process in batches of 500
-        for i in range(0, len(paper_ids), _BATCH_SIZE):
-            batch = paper_ids[i : i + _BATCH_SIZE]
-            batch_results = self._get_papers_batch_single(batch)
-            results.update(batch_results)
-
-        return results
-
-    def _get_papers_batch_single(self, paper_ids: list[str]) -> dict[str, PaperInfo | None]:
-        """Get a single batch of papers (max 500).
-
-        Args:
-            paper_ids: List of paper identifiers (max 500).
-
-        Returns:
-            Dictionary mapping paper_id to PaperInfo (or None if not found).
-        """
-        if not paper_ids:
-            return {}
-
-        try:
-            response = self._request_with_retry(
-                "POST",
-                f"{self.BASE_URL}/paper/batch",
-                params={"fields": self.FIELDS},
-                json={"ids": paper_ids},
-            )
-            data = response.json()
-
-            # Response is a list in the same order as input IDs
-            # None values indicate papers not found
-            results: dict[str, PaperInfo | None] = {}
-            for paper_id, paper_data in zip(paper_ids, data, strict=True):
-                if paper_data is None:
-                    results[paper_id] = None
-                else:
-                    results[paper_id] = self._parse_paper(paper_data)
-
-            return results
-        except httpx.HTTPError as e:
-            raise ConnectionError(f"Failed to batch get papers from Semantic Scholar: {e}") from e
-
-    # === Identifier Resolution Methods (New Architecture) ===
 
     def resolve_ids(self, paper_id: str) -> ResolvedIds | None:
         """Resolve any paper identifier to DOI/arXiv ID.

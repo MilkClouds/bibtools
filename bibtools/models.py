@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import TypedDict
@@ -40,21 +39,11 @@ class PaperMetadata:
 
 
 @dataclass
-class SourceDiscrepancy:
-    """Discrepancy between data sources (e.g., CrossRef vs Semantic Scholar)."""
-
-    field: str
-    primary_value: str
-    secondary_value: str
-
-
-@dataclass
 class FetchResult:
     """Result of fetching paper metadata and generating bibtex."""
 
     bibtex: str
     metadata: PaperMetadata
-    discrepancies: list[SourceDiscrepancy] = field(default_factory=list)
 
 
 class VerificationStatus(IntEnum):
@@ -83,64 +72,6 @@ class BibtexEntry:
     venue: str | None
     year: int | None
     entry_type: str = "inproceedings"  # "article" or "inproceedings"
-
-    @classmethod
-    def from_raw_bibtex(cls, raw_bibtex: str) -> BibtexEntry | None:
-        """Parse raw bibtex string into BibtexEntry.
-
-        Args:
-            raw_bibtex: Raw bibtex string from Semantic Scholar.
-
-        Returns:
-            BibtexEntry or None if parsing fails.
-        """
-        if not raw_bibtex:
-            return None
-
-        # Extract entry type and key
-        entry_match = re.match(r"@(\w+)\s*\{\s*([^,]+),", raw_bibtex, re.IGNORECASE)
-        if not entry_match:
-            return None
-
-        entry_type_raw = entry_match.group(1).lower()
-        key = entry_match.group(2).strip()
-
-        # Normalize entry type
-        entry_type = "article" if entry_type_raw == "article" else "inproceedings"
-
-        # Extract fields (use word boundary to avoid "title" matching "booktitle")
-        def extract_field(name: str) -> str | None:
-            pattern = rf"(?:^|[,\s]){name}\s*=\s*[\{{\"](.*?)[\}}\"]"
-            match = re.search(pattern, raw_bibtex, re.IGNORECASE | re.DOTALL | re.MULTILINE)
-            return match.group(1).strip() if match else None
-
-        title = extract_field("title") or ""
-
-        # Require title to be present for a valid entry
-        if not title:
-            return None
-
-        # Parse authors
-        author_str = extract_field("author")
-        authors = []
-        if author_str:
-            authors = [a.strip() for a in author_str.split(" and ") if a.strip()]
-
-        # Venue: booktitle (conference) or journal (article)
-        venue = extract_field("booktitle") or extract_field("journal")
-
-        # Year
-        year_str = extract_field("year")
-        year = int(year_str) if year_str and year_str.isdigit() else None
-
-        return cls(
-            key=key,
-            title=title,
-            authors=authors,
-            venue=venue,
-            year=year,
-            entry_type=entry_type,
-        )
 
     def to_bibtex(self, paper_id: str | None = None) -> str:
         """Serialize to normalized bibtex string.
@@ -171,51 +102,6 @@ class BibtexEntry:
         if paper_id:
             return f"% paper_id: {paper_id}\n{bibtex}"
         return bibtex
-
-    def get_venue_short(self) -> str | None:
-        """Get a short venue name for the verification comment."""
-        if not self.venue:
-            return None
-
-        from .venue_aliases import get_venue_short as _get_venue_short
-
-        return _get_venue_short(self.venue)
-
-
-@dataclass
-class PaperInfo:
-    """Paper information from Semantic Scholar.
-
-    Contains only paper_id and bibtex entry.
-    All other fields are accessed via bibtex property.
-    """
-
-    paper_id: str
-    bibtex: BibtexEntry
-
-    @property
-    def title(self) -> str:
-        """Get title from bibtex."""
-        return self.bibtex.title
-
-    @property
-    def authors(self) -> list[str]:
-        """Get authors from bibtex."""
-        return self.bibtex.authors
-
-    @property
-    def venue(self) -> str | None:
-        """Get venue from bibtex."""
-        return self.bibtex.venue
-
-    @property
-    def year(self) -> int | None:
-        """Get year from bibtex."""
-        return self.bibtex.year
-
-    def get_venue_short(self) -> str | None:
-        """Get a short venue name for the verification comment."""
-        return self.bibtex.get_venue_short()
 
 
 @dataclass

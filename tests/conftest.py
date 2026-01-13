@@ -6,32 +6,7 @@ from typing import Callable
 
 import pytest
 
-from bibtools.models import BibtexEntry, PaperInfo, PaperMetadata
-
-
-@pytest.fixture
-def make_paper() -> Callable[..., PaperInfo]:
-    """Fixture factory to create PaperInfo with BibtexEntry."""
-
-    def _make_paper(
-        paper_id: str,
-        title: str = "",
-        authors: list[str] | None = None,
-        venue: str | None = None,
-        year: int | None = None,
-        entry_type: str = "inproceedings",
-    ) -> PaperInfo:
-        bibtex = BibtexEntry(
-            key=paper_id,
-            title=title,
-            authors=authors or [],
-            venue=venue,
-            year=year,
-            entry_type=entry_type,
-        )
-        return PaperInfo(paper_id=paper_id, bibtex=bibtex)
-
-    return _make_paper
+from bibtools.models import PaperMetadata
 
 
 @pytest.fixture

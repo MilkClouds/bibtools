@@ -284,7 +284,10 @@ def search(
     )
 
     generator = BibtexGenerator(api_key=api_key)
-    results = generator.search_by_query(query, limit=limit)
+    try:
+        results = generator.search_by_query(query, limit=limit)
+    finally:
+        generator.close()
 
     if not results:
         console.print(f"[bold red]No results found for:[/] {query}")
@@ -292,10 +295,10 @@ def search(
 
     console.print(f"[bold blue]Found {len(results)} result(s) for:[/] {query}\n")
 
-    for i, (bibtex, paper) in enumerate(results, 1):
-        venue_short = paper.get_venue_short() or "N/A"
-        console.print(f"[bold cyan]#{i}[/] {paper.title} ({paper.year}, {venue_short})\n")
-        console.print(bibtex)
+    for i, result in enumerate(results, 1):
+        venue = result.metadata.venue or "N/A"
+        console.print(f"[bold cyan]#{i}[/] {result.metadata.title} ({result.metadata.year}, {venue})\n")
+        console.print(result.bibtex)
         console.print()
 
 

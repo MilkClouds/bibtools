@@ -134,12 +134,12 @@ class TestFetchCommand:
     """Tests for fetch command."""
 
     @patch("bibtools.cli.BibtexGenerator")
-    def test_fetch_success(self, mock_generator_class, make_paper):
+    def test_fetch_success(self, mock_generator_class):
         """Test successful paper fetch."""
+        from bibtools.models import FetchResult, PaperMetadata
+
         mock_generator = MagicMock()
         mock_generator_class.return_value = mock_generator
-
-        from bibtools.models import FetchResult, PaperMetadata
 
         metadata = PaperMetadata(
             title="Test Paper Title",
@@ -149,7 +149,7 @@ class TestFetchCommand:
             source="crossref",
         )
         bibtex = "@article{smith2024test, title = {Test Paper Title}}"
-        mock_generator.fetch_by_paper_id.return_value = FetchResult(bibtex=bibtex, metadata=metadata, discrepancies=[])
+        mock_generator.fetch_by_paper_id.return_value = FetchResult(bibtex=bibtex, metadata=metadata)
 
         result = runner.invoke(app, ["fetch", "ARXIV:2106.15928"])
         assert result.exit_code == 0
@@ -172,23 +172,23 @@ class TestSearchCommand:
     """Tests for search command."""
 
     @patch("bibtools.cli.BibtexGenerator")
-    def test_search_success(self, mock_generator_class, make_paper):
+    def test_search_success(self, mock_generator_class):
         """Test successful paper search."""
+        from bibtools.models import FetchResult, PaperMetadata
+
         mock_generator = MagicMock()
         mock_generator_class.return_value = mock_generator
 
-        papers = [
-            (
-                "@article{smith2024test}",
-                make_paper(
-                    paper_id="1",
-                    title="Machine Learning Paper",
-                    authors=["Author One"],
-                    year=2024,
-                ),
-            ),
+        metadata = PaperMetadata(
+            title="Machine Learning Paper",
+            authors=[{"given": "Author", "family": "One"}],
+            year=2024,
+            venue="NeurIPS",
+            source="crossref",
+        )
+        mock_generator.search_by_query.return_value = [
+            FetchResult(bibtex="@article{one2024ml}", metadata=metadata),
         ]
-        mock_generator.search_by_query.return_value = papers
 
         result = runner.invoke(app, ["search", "machine learning"])
         assert result.exit_code == 0

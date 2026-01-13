@@ -8,40 +8,6 @@ from bibtools.models import (
 )
 
 
-class TestPaperInfo:
-    """Tests for PaperInfo dataclass."""
-
-    def test_create_paper_info(self, make_paper):
-        """Test creating a PaperInfo instance with bibtex."""
-        paper = make_paper(
-            paper_id="abc123",
-            title="Test Paper",
-            authors=["John Doe", "Jane Smith"],
-            year=2024,
-            venue="CoRL",
-        )
-        assert paper.paper_id == "abc123"
-        assert paper.title == "Test Paper"
-        assert paper.authors == ["John Doe", "Jane Smith"]
-        assert paper.year == 2024
-        assert paper.venue == "CoRL"
-
-    def test_create_paper_info_minimal(self, make_paper):
-        """Test creating a PaperInfo with minimal fields."""
-        paper = make_paper(paper_id="abc123", title="Test Paper", authors=["Author"], year=2024)
-        assert paper.venue is None
-
-    def test_get_venue_short_known(self, make_paper):
-        """Test getting short venue name for known conferences."""
-        paper = make_paper(paper_id="abc", venue="Conference on Robot Learning")
-        assert paper.get_venue_short() == "CoRL"
-
-    def test_get_venue_short_unknown(self, make_paper):
-        """Test getting short venue name for unknown venue."""
-        paper = make_paper(paper_id="abc", venue="Some Random Journal")
-        assert paper.get_venue_short() == "Some Random Journal"
-
-
 class TestVerificationResult:
     """Tests for VerificationResult dataclass."""
 
