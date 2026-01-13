@@ -1,16 +1,17 @@
 """Bibtex generation with single source of truth principle.
 
 Architecture:
-1. Semantic Scholar: Resolve identifier → DOI/arXiv ID/DBLP ID
+1. Semantic Scholar: Resolve identifier → DOI/arXiv ID + venue detection
 2. CrossRef: Fetch metadata if DOI exists (primary source)
-3. DBLP: Fetch metadata if DBLP ID exists but no DOI (e.g., ICLR)
-4. arXiv: Fetch metadata if arXiv-only (preprints)
+3. DBLP: Fetch metadata if venue != arXiv (title-based search)
+4. arXiv: Fetch metadata if venue == arXiv (preprints)
 
 Each bibtex entry uses exactly ONE source of truth - no mixing.
 """
 
 import os
 
+from . import logging as log
 from .arxiv_client import ArxivClient, ArxivMetadata
 from .crossref import CrossRefClient, CrossRefError, CrossRefMetadata
 from .dblp import DBLPClient, DBLPMetadata
@@ -70,45 +71,55 @@ class BibtexGenerator:
     def fetch_by_paper_id(self, paper_id: str) -> FetchResult | None:
         """Fetch bibtex by paper_id using single source of truth.
 
-        Flow: SS resolve → CrossRef (DOI) → DBLP (no DOI) → arXiv (preprint)
+        Flow: SS resolve → CrossRef (DOI) → DBLP (venue != arXiv) → arXiv
         Returns None if paper not found. Raises on API errors.
         """
         # Step 1: Resolve identifier via Semantic Scholar
         resolved = self.ss_client.resolve_ids(paper_id)
         if not resolved:
+            log.debug(f"Paper not found in Semantic Scholar: {paper_id}")
             return None
 
+        log.info(f"Resolved: {paper_id} | DOI={resolved.doi} | arXiv={resolved.arxiv_id} | venue={resolved.venue}")
         return self._fetch_with_resolved_ids(paper_id, resolved)
 
     def _fetch_with_resolved_ids(self, paper_id: str, resolved: ResolvedIds) -> FetchResult | None:
-        """Fetch metadata using resolved DOI/arXiv ID/DBLP ID.
+        """Fetch metadata using resolved DOI/arXiv ID + venue.
 
-        Priority: CrossRef (DOI) > DBLP (no DOI) > arXiv (preprint)
-        Each entry uses exactly ONE source - no mixing.
+        Source selection (mutually exclusive):
+        - if DOI exists       -> CrossRef
+        - elif venue != arXiv -> DBLP
+        - else                -> arXiv
+
+        Each entry uses exactly ONE source - no mixing or fallback.
         """
         discrepancies: list[SourceDiscrepancy] = []
 
-        # Step 2: Try CrossRef if DOI exists (primary source)
+        # Case 1: DOI exists -> CrossRef
         if resolved.doi:
+            log.info("Source: crossref (DOI exists)")
             crossref_meta = self.crossref_client.get_paper_metadata(resolved.doi)
             if crossref_meta:
                 metadata = self._crossref_to_metadata(crossref_meta)
                 bibtex = self._metadata_to_bibtex(metadata, paper_id)
                 return FetchResult(bibtex=bibtex, metadata=metadata, discrepancies=discrepancies)
-            # CrossRef failed with DOI - this is an error
             raise CrossRefError(f"DOI exists but CrossRef lookup failed: {resolved.doi}")
 
-        # Step 3: Try DBLP if DBLP ID exists (for venues without DOI like ICLR)
-        if resolved.dblp_id:
-            dblp_meta = self.dblp_client.get_paper_metadata(resolved.dblp_id)
-            if dblp_meta:
-                metadata = self._dblp_to_metadata(dblp_meta)
-                bibtex = self._metadata_to_bibtex(metadata, paper_id)
-                return FetchResult(bibtex=bibtex, metadata=metadata, discrepancies=discrepancies)
-            # DBLP lookup failed - fall through to arXiv
+        # Case 2: No DOI, venue != arXiv -> DBLP
+        venue_is_arxiv = self._is_arxiv_venue(resolved.venue)
+        if not venue_is_arxiv:
+            log.info(f"Source: dblp (venue={resolved.venue})")
+            if resolved.title:
+                dblp_meta = self.dblp_client.search_by_title(resolved.title, resolved.venue)
+                if dblp_meta:
+                    metadata = self._dblp_to_metadata(dblp_meta)
+                    bibtex = self._metadata_to_bibtex(metadata, paper_id)
+                    return FetchResult(bibtex=bibtex, metadata=metadata, discrepancies=discrepancies)
+            return None
 
-        # Step 4: arXiv fallback (preprints only)
+        # Case 3: No DOI, venue == arXiv -> arXiv
         if resolved.arxiv_id:
+            log.info("Source: arxiv")
             arxiv_meta = self.arxiv_client.get_paper_metadata(resolved.arxiv_id)
             if arxiv_meta:
                 metadata = self._arxiv_to_metadata(arxiv_meta)
@@ -116,6 +127,13 @@ class BibtexGenerator:
                 return FetchResult(bibtex=bibtex, metadata=metadata, discrepancies=discrepancies)
 
         return None
+
+    def _is_arxiv_venue(self, venue: str | None) -> bool:
+        """Check if venue indicates arXiv preprint."""
+        if not venue:
+            return True  # No venue info, assume arXiv
+        venue_lower = venue.lower()
+        return "arxiv" in venue_lower or venue_lower in ("", "corr")
 
     def _crossref_to_metadata(self, cr: CrossRefMetadata) -> PaperMetadata:
         """Convert CrossRefMetadata to unified PaperMetadata."""

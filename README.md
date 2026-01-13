@@ -15,22 +15,26 @@ bibtools verify main.bib
         ↓
 Extract paper_id (DOI/arXiv ID) from each entry
         ↓
-Semantic Scholar → Resolve to DOI/arXiv ID/DBLP ID
+Semantic Scholar → Resolve to DOI/arXiv ID + venue
         ↓
-CrossRef (DOI) → DBLP (no DOI) → arXiv (preprint)
+    ┌─────────────────────────────────────────┐
+    │ if DOI exists       → CrossRef          │
+    │ elif venue != arXiv → DBLP              │
+    │ else                → arXiv             │
+    └─────────────────────────────────────────┘
         ↓
 Compare with existing entry → PASS / WARNING / FAIL
 ```
 
 **Data sources (Single Source of Truth):**
 
-| Priority | Source | When Used | Provides |
-|----------|--------|-----------|----------|
-| 1 | **CrossRef** | DOI exists | Official venue, year, authors |
-| 2 | **DBLP** | No DOI, DBLP ID exists | Conference venue, year (e.g., ICLR) |
-| 3 | **arXiv** | No DOI or DBLP | Preprint metadata |
+| Condition | Source |
+|-----------|--------|
+| DOI exists | **CrossRef** |
+| No DOI, venue != arXiv | **DBLP** |
+| No DOI, venue == arXiv | **arXiv** |
 
-- **Semantic Scholar** - ID resolution only (paper_id → DOI/arXiv ID/DBLP ID)
+- **Semantic Scholar** - ID resolution + venue detection (determines which source to use)
 
 ## Is it reliable?
 

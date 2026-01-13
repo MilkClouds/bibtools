@@ -19,13 +19,15 @@ class ResolvedIds:
     """Resolved external IDs from Semantic Scholar.
 
     These IDs are used to fetch metadata from the appropriate source of truth.
-    Priority: DOI (CrossRef) > DBLP > arXiv
+    Priority: DOI (CrossRef) > venue != arXiv (DBLP) > arXiv
     """
 
     paper_id: str
     doi: str | None
     arxiv_id: str | None
     dblp_id: str | None  # e.g., "conf/iclr/HuSWALWWC22"
+    venue: str | None = None  # e.g., "ICLR", "NeurIPS", "arXiv"
+    title: str | None = None  # Paper title for DBLP title-based search
 
 
 class SemanticScholarClient:
@@ -36,7 +38,7 @@ class SemanticScholarClient:
     """
 
     BASE_URL = "https://api.semanticscholar.org/graph/v1"
-    FIELDS = "paperId,citationStyles,externalIds,venue"
+    FIELDS = "paperId,citationStyles,externalIds,venue,title"
 
     def __init__(self, api_key: str | None = None, max_retries: int = 3):
         self.api_key = api_key
@@ -442,7 +444,7 @@ class SemanticScholarClient:
             response = self._request_with_retry(
                 "GET",
                 f"{self.BASE_URL}/paper/{normalized_id}",
-                params={"fields": "paperId,externalIds,venue"},
+                params={"fields": "paperId,externalIds,venue,title"},
             )
             return self._parse_resolved_ids(response.json())
         except httpx.HTTPStatusError as e:
@@ -490,7 +492,7 @@ class SemanticScholarClient:
             response = self._request_with_retry(
                 "POST",
                 f"{self.BASE_URL}/paper/batch",
-                params={"fields": "paperId,externalIds,venue"},
+                params={"fields": "paperId,externalIds,venue,title"},
                 json={"ids": paper_ids},
             )
             data = response.json()
@@ -518,9 +520,18 @@ class SemanticScholarClient:
         doi = external_ids.get("DOI")
         arxiv_id = external_ids.get("ArXiv")
         dblp_id = external_ids.get("DBLP")
+        venue = data.get("venue") or None
+        title = data.get("title") or None
 
         # Skip arXiv DOIs (e.g., 10.48550/arXiv.xxxx) - treat as arXiv-only
         if doi and "arxiv" in doi.lower():
             doi = None
 
-        return ResolvedIds(paper_id=paper_id, doi=doi, arxiv_id=arxiv_id, dblp_id=dblp_id)
+        return ResolvedIds(
+            paper_id=paper_id,
+            doi=doi,
+            arxiv_id=arxiv_id,
+            dblp_id=dblp_id,
+            venue=venue,
+            title=title,
+        )

@@ -5,27 +5,25 @@
 | Paper | Source | Winner | Key Difference |
 |-------|--------|--------|----------------|
 | ResNet (CVPR 2016) | CrossRef | Draw | bibtools: official venue, GS: pages |
-| Attention (NeurIPS 2017) | arXiv | ⚠️ Note | SS returns arXiv DBLP key → skip |
+| Attention (NeurIPS 2017) | DBLP | ✅ bibtools | DBLP title search finds NIPS 2017 |
 | LoRA (ICLR 2022) | DBLP | ✅ bibtools | Correct year (2022) and venue (ICLR) |
-| StreamingLLM (ICLR 2024) | arXiv | ⚠️ Note | DBLP search fails → arXiv fallback |
-| Self-Instruct (ACL 2023) | arXiv | ⚠️ Note | SS returns arXiv DBLP key → skip |
+| StreamingLLM (ICLR 2024) | DBLP | ✅ bibtools | DBLP title search finds ICLR 2024 |
+| Self-Instruct (ACL 2023) | DBLP | ✅ bibtools | DBLP title search finds ACL 2023 |
 | ACL Paper (ACL 2023) | CrossRef | ✅ bibtools | Full official metadata from CrossRef |
 
 ### Key Findings
 
 **bibtools advantages:**
 - **CrossRef (DOI)**: Official venue names and correct publication years
-- **DBLP**: Correct venue/year for DOI-less conferences (ICLR, some NeurIPS)
+- **DBLP (venue-based)**: Uses SS venue to search DBLP by title - works even when DBLP ID is arXiv version
 - **arXiv**: Full author lists without truncation
 
 **bibtools limitations:**
-- **arXiv fallback**: When DBLP lookup fails, year is arXiv submission date
 - No page numbers (not in metadata)
-- Some papers have SS returning arXiv DBLP key instead of conference key
 
-**Recommendation:**
-- bibtools automatically uses the best source available (DOI > DBLP > arXiv)
-- ICLR papers now get correct year/venue via DBLP
+**New in this version:**
+- Uses SS venue field to decide source (not DBLP ID format)
+- DBLP title search with canonical venue names (e.g., "Neural Information Processing Systems" → "NIPS")
 
 ---
 
@@ -33,13 +31,13 @@
 
 bibtools uses **official sources only** with single source of truth principle:
 
-| Priority | Source | Used When | Provides |
-|----------|--------|-----------|----------|
-| 1 | **CrossRef** | DOI exists | Official venue, year, authors |
-| 2 | **DBLP** | No DOI, DBLP ID exists | Conference venue, year, authors |
-| 3 | **arXiv** | No DOI or DBLP | Preprint metadata |
+| Condition | Source |
+|-----------|--------|
+| DOI exists | **CrossRef** |
+| No DOI, venue != arXiv | **DBLP** |
+| No DOI, venue == arXiv | **arXiv** |
 
-- **Semantic Scholar** - Only for ID resolution (DOI/arXiv/DBLP ID extraction)
+- **Semantic Scholar** - ID resolution + venue detection (determines which source to use)
 
 ---
 
@@ -65,7 +63,7 @@ $ bibtools fetch DOI:10.1109/CVPR.2016.90
 
 ---
 
-### 2. Attention Is All You Need (NeurIPS 2017) - via arXiv
+### 2. Attention Is All You Need (NeurIPS 2017) - via DBLP
 
 ```bash
 $ bibtools fetch 1706.03762
@@ -74,14 +72,14 @@ $ bibtools fetch 1706.03762
 ```bibtex
 % paper_id: 1706.03762
 @inproceedings{vaswani2017,
-  title = {Attention Is All You Need},
+  title = {Attention is All you Need},
   author = {Vaswani, Ashish and Shazeer, Noam and Parmar, Niki and Uszkoreit, Jakob and Jones, Llion and Gomez, Aidan N. and Kaiser, Lukasz and Polosukhin, Illia},
-  booktitle = {arXiv},
+  booktitle = {NIPS},
   year = {2017}
 }
 ```
 
-**Source: arXiv** ⚠️ No DOI or DBLP ID from SS → arXiv fallback (venue shows "arXiv")
+**Source: DBLP** ✅ SS venue="Neural Information Processing Systems" → DBLP title search with "NIPS"
 
 ---
 
@@ -105,7 +103,7 @@ $ bibtools fetch 2106.09685
 
 ---
 
-### 4. StreamingLLM (ICLR 2024) - via arXiv (DBLP search failed)
+### 4. StreamingLLM (ICLR 2024) - via DBLP
 
 ```bash
 $ bibtools fetch 2309.17453
@@ -113,19 +111,19 @@ $ bibtools fetch 2309.17453
 
 ```bibtex
 % paper_id: 2309.17453
-@inproceedings{xiao2023,
+@inproceedings{xiao2024,
   title = {Efficient Streaming Language Models with Attention Sinks},
   author = {Xiao, Guangxuan and Tian, Yuandong and Chen, Beidi and Han, Song and Lewis, Mike},
-  booktitle = {arXiv},
-  year = {2023}
+  booktitle = {ICLR},
+  year = {2024}
 }
 ```
 
-**Source: arXiv** ⚠️ SS returns valid DBLP key but DBLP search fails → arXiv fallback
+**Source: DBLP** ✅ SS venue="ICLR" → DBLP title search finds ICLR 2024
 
 ---
 
-### 5. Self-Instruct (ACL 2023) - via arXiv (arXiv DBLP key)
+### 5. Self-Instruct (ACL 2023) - via DBLP
 
 ```bash
 $ bibtools fetch 2212.10560
@@ -133,15 +131,15 @@ $ bibtools fetch 2212.10560
 
 ```bibtex
 % paper_id: 2212.10560
-@inproceedings{wang2022,
+@inproceedings{wang2023,
   title = {Self-Instruct: Aligning Language Models with Self-Generated Instructions},
   author = {Wang, Yizhong and Kordi, Yeganeh and Mishra, Swaroop and Liu, Alisa and Smith, Noah A. and Khashabi, Daniel and Hajishirzi, Hannaneh},
-  booktitle = {arXiv},
-  year = {2022}
+  booktitle = {ACL},
+  year = {2023}
 }
 ```
 
-**Source: arXiv** ⚠️ SS returns `journals/corr/...` DBLP key (arXiv preprint) → skipped
+**Source: DBLP** ✅ SS venue="ACL" → DBLP title search finds ACL 2023
 
 ---
 
@@ -201,16 +199,22 @@ $ bibtools fetch ARXIV:2303.08774
 
 ### Source Priority
 
-bibtools automatically selects the best available source:
+bibtools automatically selects the best available source based on SS venue:
 
 | Priority | Source | When Used | Example |
 |----------|--------|-----------|---------|
-| 1 | CrossRef | DOI exists | Most ACL, NeurIPS papers |
-| 2 | DBLP | No DOI, DBLP ID exists | ICLR papers |
-| 3 | arXiv | No DOI or DBLP | Preprints, SS returning arXiv DBLP key |
+| 1 | CrossRef | DOI exists | Most ACL papers with DOI |
+| 2 | DBLP | No DOI, venue != arXiv | ICLR, NeurIPS, ACL (title search) |
+| 3 | arXiv | venue == arXiv | Preprints only |
+
+### How It Works
+
+1. **Semantic Scholar** resolves paper ID → DOI, arXiv ID, venue, title
+2. If **DOI exists** → CrossRef (official publisher data)
+3. If **venue != arXiv** → DBLP title search with canonical venue name
+4. If **venue == arXiv** → arXiv metadata
 
 ### Known Limitations
 
-- **arXiv DBLP key**: SS sometimes returns the arXiv version DBLP key (`journals/corr/...`) instead of the conference version. bibtools skips these and falls back to arXiv.
-- **DBLP search**: Even with valid DBLP key, the search query may not find the paper. This is being improved.
 - **No page numbers**: Page numbers are not included in CrossRef/DBLP/arXiv metadata.
+- **DBLP venue mapping**: Some venue names may not map correctly (e.g., workshops).

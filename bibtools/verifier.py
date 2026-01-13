@@ -6,6 +6,7 @@ from pathlib import Path
 
 from rich.console import Console
 
+from . import logging as log
 from .arxiv_client import ArxivClient
 from .constants import AUTO_FIND_ID, AUTO_FIND_NONE, AUTO_FIND_TITLE
 from .crossref import CrossRefClient
@@ -101,11 +102,10 @@ class BibVerifier:
         """Fetch paper metadata using single source of truth principle.
 
         Priority:
-        1. S2 resolves paper_id → DOI/DBLP/arXiv ID
+        1. S2 resolves paper_id → DOI/arXiv ID + venue detection
         2. If DOI exists → fetch from CrossRef (primary source)
-        3. Else if DBLP ID exists → fetch from DBLP (venues without DOI like ICLR)
-        4. Else if arXiv ID exists → fetch from arXiv (preprints)
-        5. Else → return None
+        3. Else if venue != arXiv → fetch from DBLP (title-based search)
+        4. Else if arXiv → fetch from arXiv (preprints)
 
         Args:
             paper_id: Any paper identifier (DOI:xxx, ARXIV:xxx, CorpusId:xxx, etc.)
@@ -113,13 +113,17 @@ class BibVerifier:
         Returns:
             PaperMetadata with source field set, or None if not found.
         """
-        # Step 1: Resolve to DOI/DBLP/arXiv ID via S2
+        # Step 1: Resolve to DOI/arXiv ID + venue via S2
         resolved = self.s2_client.resolve_ids(paper_id)
         if not resolved:
+            log.debug(f"Paper not found in Semantic Scholar: {paper_id}")
             return None
 
-        # Step 2: Try CrossRef first (most reliable for published papers)
+        log.info(f"Resolved: {paper_id} | DOI={resolved.doi} | arXiv={resolved.arxiv_id} | venue={resolved.venue}")
+
+        # Case 1: DOI exists -> CrossRef
         if resolved.doi:
+            log.info("Source: crossref (DOI exists)")
             crossref_meta = self.crossref_client.get_paper_metadata(resolved.doi)
             if crossref_meta:
                 return PaperMetadata(
@@ -131,23 +135,29 @@ class BibVerifier:
                     arxiv_id=resolved.arxiv_id,
                     source="crossref",
                 )
+            return None
 
-        # Step 3: Try DBLP (for venues without DOI like ICLR)
-        if resolved.dblp_id:
-            dblp_meta = self.dblp_client.get_paper_metadata(resolved.dblp_id)
-            if dblp_meta:
-                return PaperMetadata(
-                    title=dblp_meta.title,
-                    authors=dblp_meta.authors,
-                    year=dblp_meta.year,
-                    venue=dblp_meta.venue,
-                    doi=dblp_meta.doi,
-                    arxiv_id=resolved.arxiv_id,
-                    source="dblp",
-                )
+        # Case 2: No DOI, venue != arXiv -> DBLP
+        venue_is_arxiv = self._is_arxiv_venue(resolved.venue)
+        if not venue_is_arxiv:
+            log.info(f"Source: dblp (venue={resolved.venue})")
+            if resolved.title:
+                dblp_meta = self.dblp_client.search_by_title(resolved.title, resolved.venue)
+                if dblp_meta:
+                    return PaperMetadata(
+                        title=dblp_meta.title,
+                        authors=dblp_meta.authors,
+                        year=dblp_meta.year,
+                        venue=dblp_meta.venue,
+                        doi=dblp_meta.doi,
+                        arxiv_id=resolved.arxiv_id,
+                        source="dblp",
+                    )
+            return None
 
-        # Step 4: Try arXiv (preprints)
+        # Case 3: No DOI, venue == arXiv -> arXiv
         if resolved.arxiv_id:
+            log.info("Source: arxiv")
             arxiv_meta = self.arxiv_client.get_paper_metadata(resolved.arxiv_id)
             if arxiv_meta:
                 return PaperMetadata(
@@ -161,6 +171,13 @@ class BibVerifier:
                 )
 
         return None
+
+    def _is_arxiv_venue(self, venue: str | None) -> bool:
+        """Check if venue indicates arXiv preprint."""
+        if not venue:
+            return True  # No venue info, assume arXiv
+        venue_lower = venue.lower()
+        return "arxiv" in venue_lower or venue_lower in ("", "corr")
 
     def _should_skip_verified(self, date_str: str | None) -> bool:
         """Determine if a verified entry should be skipped based on age.

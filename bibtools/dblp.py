@@ -1,7 +1,7 @@
 """DBLP client for paper metadata.
 
 DBLP is used as a source of truth for papers without DOI (e.g., ICLR, some NeurIPS).
-Priority: DOI (CrossRef) > DBLP > arXiv
+Priority: DOI (CrossRef) > DBLP (venue != arXiv) > arXiv
 """
 
 import re
@@ -9,7 +9,9 @@ from dataclasses import dataclass
 
 import httpx
 
+from . import logging as log
 from .models import Author
+from .venue_aliases import get_canonical_venue
 
 
 @dataclass
@@ -79,7 +81,83 @@ class DBLPClient:
             return None
 
         except httpx.HTTPError:
+            log.debug(f"DBLP HTTP error for key: {dblp_key}")
             return None
+
+    def search_by_title(self, title: str, venue: str | None = None) -> DBLPMetadata | None:
+        """Search for a paper by title (and optionally venue).
+
+        This is used when DBLP ID from Semantic Scholar is an arXiv key
+        (journals/corr/...) but the paper was actually published at a conference.
+
+        Args:
+            title: Paper title to search for
+            venue: Optional venue name (e.g., "NeurIPS", "ICLR") to filter results
+
+        Returns:
+            DBLPMetadata if found, None otherwise.
+        """
+        if not title:
+            return None
+
+        try:
+            # Build search query: title + canonical venue (for DBLP search)
+            query = title
+            if venue:
+                # Use canonical short name for better DBLP search
+                # e.g., "Neural Information Processing Systems" -> "NIPS"
+                canonical = get_canonical_venue(venue)
+                # DBLP uses NIPS for older NeurIPS
+                search_venue = canonical if canonical else venue
+                if search_venue.upper() == "NEURIPS":
+                    search_venue = "NIPS"  # DBLP uses NIPS
+                query = f"{title} {search_venue}"
+
+            log.debug(f"DBLP title search: {query[:80]}...")
+
+            resp = self._client.get(
+                f"{self.BASE_URL}/search/publ/api",
+                params={"q": query, "format": "json", "h": 10},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            hits = data.get("result", {}).get("hits", {}).get("hit", [])
+            if not hits:
+                log.debug("DBLP title search: no results")
+                return None
+
+            # Find best match - prefer conference papers over arXiv
+            for hit in hits:
+                info = hit.get("info", {})
+                hit_key = info.get("key", "")
+
+                # Skip arXiv entries (journals/corr/...)
+                if hit_key.startswith("journals/corr"):
+                    continue
+
+                # Check title similarity (case-insensitive)
+                hit_title = (info.get("title") or "").rstrip(".")
+                if self._titles_match(title, hit_title):
+                    log.debug(f"DBLP title search: found {hit_key}")
+                    return self._parse_info(info, hit_key)
+
+            log.debug("DBLP title search: no matching conference paper")
+            return None
+
+        except httpx.HTTPError:
+            log.debug(f"DBLP HTTP error for title search: {title[:50]}")
+            return None
+
+    def _titles_match(self, title1: str, title2: str) -> bool:
+        """Check if two titles match (case-insensitive, ignore punctuation)."""
+
+        def normalize(t: str) -> str:
+            # Remove punctuation and extra whitespace, lowercase
+            t = re.sub(r"[^\w\s]", " ", t.lower())
+            return " ".join(t.split())
+
+        return normalize(title1) == normalize(title2)
 
     def _build_search_query(self, dblp_key: str) -> str:
         """Build a search query from DBLP key.
