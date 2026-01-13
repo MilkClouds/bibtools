@@ -15,22 +15,31 @@ bibtools verify main.bib
         ↓
 Extract paper_id (DOI/arXiv ID) from each entry
         ↓
-Semantic Scholar → Resolve to DOI/arXiv ID
+Semantic Scholar → Resolve to DOI/arXiv ID/DBLP ID
         ↓
-CrossRef (DOI) or arXiv → Fetch official metadata
+CrossRef (DOI) → DBLP (no DOI) → arXiv (preprint)
         ↓
 Compare with existing entry → PASS / WARNING / FAIL
 ```
 
-**Data sources (Source of Truth):**
-- **CrossRef** - Official DOI registry (publisher-submitted metadata: title, authors, venue, year)
-- **arXiv** - Preprint metadata (title, authors, year)
-- **Semantic Scholar** - ID resolution only (paper_id → DOI/arXiv ID, venue detection)
+**Data sources (Single Source of Truth):**
+
+| Priority | Source | When Used | Provides |
+|----------|--------|-----------|----------|
+| 1 | **CrossRef** | DOI exists | Official venue, year, authors |
+| 2 | **DBLP** | No DOI, DBLP ID exists | Conference venue, year (e.g., ICLR) |
+| 3 | **arXiv** | No DOI or DBLP | Preprint metadata |
+
+- **Semantic Scholar** - ID resolution only (paper_id → DOI/arXiv ID/DBLP ID)
 
 ## Is it reliable?
 
 bibtools does **NOT generate or guess metadata**.
-It only uses data from CrossRef (official DOI registry) and arXiv (preprint source).
+It uses data from official sources only:
+- **CrossRef** - Official DOI registry (publisher-submitted)
+- **DBLP** - Computer science bibliography (for venues without DOI like ICLR)
+- **arXiv** - Preprint source
+
 Semantic Scholar is used only for identifier resolution, not as a metadata source.
 
 → [Comparison with Google Scholar](docs/comparison_with_google_scholar.md)
@@ -46,7 +55,7 @@ uv tool install git+https://github.com/MilkClouds/bibtools
 ## Quick Start
 
 ```bash
-bibtools fetch ARXIV:2502.19417       # Fetch bibtex by arXiv ID
+bibtools fetch 2106.09685             # LoRA - auto-detects arXiv ID, gets ICLR 2022 from DBLP
 bibtools fetch DOI:10.1109/CVPR.2016.90  # Fetch by DOI
 bibtools verify main.bib              # Verify existing entries
 bibtools search "Attention Is All You Need"  # Search (use with caution)
@@ -56,7 +65,7 @@ bibtools search "Attention Is All You Need"  # Search (use with caution)
 
 ### verify
 
-Verifies bibtex entries against official metadata from CrossRef/arXiv.
+Verifies bibtex entries against official metadata from CrossRef/DBLP/arXiv.
 
 ```bash
 bibtools verify main.bib                      # Default: --auto-find=id
@@ -66,12 +75,13 @@ bibtools verify main.bib --auto-find=none --fix  # Fix mode
 
 ### fetch
 
-Fetches bibtex by paper ID. Metadata from CrossRef (DOI) or arXiv.
+Fetches bibtex by paper ID. Metadata from CrossRef (DOI) → DBLP → arXiv.
 
 ```bash
-bibtools fetch ARXIV:2106.15928              # Metadata from arXiv
-bibtools fetch DOI:10.18653/v1/N18-3011      # Metadata from CrossRef
-bibtools fetch DOI:10.1109/CVPR.2016.90      # ResNet - correct year from CrossRef
+bibtools fetch 2106.09685                    # LoRA - DBLP (ICLR 2022)
+bibtools fetch DOI:10.18653/v1/N18-3011      # CrossRef (ACL)
+bibtools fetch DOI:10.1109/CVPR.2016.90      # CrossRef (CVPR)
+bibtools fetch ARXIV:2303.08774              # arXiv (GPT-4 - preprint)
 ```
 
 ### search

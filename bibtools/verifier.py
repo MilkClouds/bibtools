@@ -9,6 +9,7 @@ from rich.console import Console
 from .arxiv_client import ArxivClient
 from .constants import AUTO_FIND_ID, AUTO_FIND_NONE, AUTO_FIND_TITLE
 from .crossref import CrossRefClient
+from .dblp import DBLPClient
 from .models import FieldMismatch, PaperMetadata, VerificationReport, VerificationResult
 from .parser import (
     extract_paper_id_from_entry,
@@ -39,6 +40,7 @@ class BibVerifier:
         *,
         s2_client: SemanticScholarClient | None = None,
         crossref_client: CrossRefClient | None = None,
+        dblp_client: DBLPClient | None = None,
         arxiv_client: ArxivClient | None = None,
     ):
         """Initialize the verifier.
@@ -53,6 +55,7 @@ class BibVerifier:
             console: Rich console for output.
             s2_client: Optional pre-configured SemanticScholarClient (for sharing).
             crossref_client: Optional pre-configured CrossRefClient (for sharing).
+            dblp_client: Optional pre-configured DBLPClient (for sharing).
             arxiv_client: Optional pre-configured ArxivClient (for sharing).
         """
         import os
@@ -60,10 +63,12 @@ class BibVerifier:
         effective_api_key = api_key or os.environ.get("SEMANTIC_SCHOLAR_API_KEY")
         self.s2_client = s2_client or SemanticScholarClient(api_key=effective_api_key)
         self.crossref_client = crossref_client or CrossRefClient()
+        self.dblp_client = dblp_client or DBLPClient()
         self.arxiv_client = arxiv_client or ArxivClient()
         # Track which clients we own (for proper cleanup)
         self._owns_s2 = s2_client is None
         self._owns_crossref = crossref_client is None
+        self._owns_dblp = dblp_client is None
         self._owns_arxiv = arxiv_client is None
 
         self.skip_verified = skip_verified
@@ -82,6 +87,8 @@ class BibVerifier:
             self.s2_client.close()
         if self._owns_crossref:
             self.crossref_client.close()
+        if self._owns_dblp:
+            self.dblp_client.close()
         # ArxivClient doesn't need closing (uses feedparser, no persistent connection)
 
     def __enter__(self) -> "BibVerifier":
@@ -91,13 +98,14 @@ class BibVerifier:
         self.close()
 
     def _fetch_metadata(self, paper_id: str) -> PaperMetadata | None:
-        """Fetch paper metadata from CrossRef or arXiv via S2 ID resolution.
+        """Fetch paper metadata using single source of truth principle.
 
-        Flow:
-        1. S2 resolves paper_id → DOI/arXiv ID
-        2. If DOI exists → fetch from CrossRef
-        3. Else if arXiv ID exists → fetch from arXiv
-        4. Else → return None
+        Priority:
+        1. S2 resolves paper_id → DOI/DBLP/arXiv ID
+        2. If DOI exists → fetch from CrossRef (primary source)
+        3. Else if DBLP ID exists → fetch from DBLP (venues without DOI like ICLR)
+        4. Else if arXiv ID exists → fetch from arXiv (preprints)
+        5. Else → return None
 
         Args:
             paper_id: Any paper identifier (DOI:xxx, ARXIV:xxx, CorpusId:xxx, etc.)
@@ -105,7 +113,7 @@ class BibVerifier:
         Returns:
             PaperMetadata with source field set, or None if not found.
         """
-        # Step 1: Resolve to DOI/arXiv ID via S2
+        # Step 1: Resolve to DOI/DBLP/arXiv ID via S2
         resolved = self.s2_client.resolve_ids(paper_id)
         if not resolved:
             return None
@@ -124,7 +132,21 @@ class BibVerifier:
                     source="crossref",
                 )
 
-        # Step 3: Try arXiv
+        # Step 3: Try DBLP (for venues without DOI like ICLR)
+        if resolved.dblp_id:
+            dblp_meta = self.dblp_client.get_paper_metadata(resolved.dblp_id)
+            if dblp_meta:
+                return PaperMetadata(
+                    title=dblp_meta.title,
+                    authors=dblp_meta.authors,
+                    year=dblp_meta.year,
+                    venue=dblp_meta.venue,
+                    doi=dblp_meta.doi,
+                    arxiv_id=resolved.arxiv_id,
+                    source="dblp",
+                )
+
+        # Step 4: Try arXiv (preprints)
         if resolved.arxiv_id:
             arxiv_meta = self.arxiv_client.get_paper_metadata(resolved.arxiv_id)
             if arxiv_meta:

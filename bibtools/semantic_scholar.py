@@ -16,12 +16,16 @@ _BATCH_SIZE = 500
 
 @dataclass
 class ResolvedIds:
-    """Resolved external IDs from Semantic Scholar."""
+    """Resolved external IDs from Semantic Scholar.
+
+    These IDs are used to fetch metadata from the appropriate source of truth.
+    Priority: DOI (CrossRef) > DBLP > arXiv
+    """
 
     paper_id: str
     doi: str | None
     arxiv_id: str | None
-    venue: str | None  # For informational purposes only (not used as source of truth)
+    dblp_id: str | None  # e.g., "conf/iclr/HuSWALWWC22"
 
 
 class SemanticScholarClient:
@@ -425,11 +429,19 @@ class SemanticScholarClient:
 
         This is the primary entry point for the new architecture.
         Returns DOI and arXiv ID for downstream metadata fetching.
+
+        Supports:
+        - arXiv ID: "2106.09685" or "ARXIV:2106.09685"
+        - DOI: "10.1234/..." or "DOI:10.1234/..."
+        - Semantic Scholar ID: "649def34f8be52c8b66281af98ae884c09aef38b"
         """
+        # Normalize arXiv ID (add ARXIV: prefix if looks like arXiv ID)
+        normalized_id = self._normalize_paper_id(paper_id)
+
         try:
             response = self._request_with_retry(
                 "GET",
-                f"{self.BASE_URL}/paper/{paper_id}",
+                f"{self.BASE_URL}/paper/{normalized_id}",
                 params={"fields": "paperId,externalIds,venue"},
             )
             return self._parse_resolved_ids(response.json())
@@ -439,6 +451,23 @@ class SemanticScholarClient:
             raise
         except httpx.HTTPError:
             return None
+
+    def _normalize_paper_id(self, paper_id: str) -> str:
+        """Normalize paper ID for Semantic Scholar API.
+
+        Adds ARXIV: prefix to bare arXiv IDs (e.g., "2106.09685" -> "ARXIV:2106.09685").
+        """
+        # Already has a prefix
+        if ":" in paper_id or "/" in paper_id:
+            return paper_id
+
+        # Check if it looks like an arXiv ID (YYMM.NNNNN format)
+        import re
+
+        if re.match(r"^\d{4}\.\d{4,5}(v\d+)?$", paper_id):
+            return f"ARXIV:{paper_id}"
+
+        return paper_id
 
     def resolve_ids_batch(self, paper_ids: list[str]) -> dict[str, ResolvedIds | None]:
         """Resolve multiple paper identifiers to DOI/arXiv ID in batch."""
@@ -488,10 +517,10 @@ class SemanticScholarClient:
         external_ids = data.get("externalIds", {}) or {}
         doi = external_ids.get("DOI")
         arxiv_id = external_ids.get("ArXiv")
-        venue = data.get("venue")
+        dblp_id = external_ids.get("DBLP")
 
         # Skip arXiv DOIs (e.g., 10.48550/arXiv.xxxx) - treat as arXiv-only
         if doi and "arxiv" in doi.lower():
             doi = None
 
-        return ResolvedIds(paper_id=paper_id, doi=doi, arxiv_id=arxiv_id, venue=venue)
+        return ResolvedIds(paper_id=paper_id, doi=doi, arxiv_id=arxiv_id, dblp_id=dblp_id)

@@ -120,11 +120,12 @@ class TestBibtexGenerator:
         generator = BibtexGenerator.__new__(BibtexGenerator)
         generator.ss_client = MagicMock()
         generator.crossref_client = MagicMock()
+        generator.dblp_client = MagicMock()
         generator.arxiv_client = MagicMock()
 
-        # Mock SS resolve
+        # Mock SS resolve (no venue - it's now fetched from CrossRef/DBLP/arXiv)
         generator.ss_client.resolve_ids.return_value = ResolvedIds(
-            paper_id="abc", doi="10.1234/test", arxiv_id=None, venue="Conf"
+            paper_id="abc", doi="10.1234/test", arxiv_id=None, dblp_id=None
         )
         # Mock CrossRef
         generator.crossref_client.get_paper_metadata.return_value = CrossRefMetadata(
