@@ -703,3 +703,238 @@ class TestVerifierWithMockAPI:
         assert report.verified_with_warnings == 0
         # "verified via" SHOULD be added
         assert "verified via bibtools" in updated_content
+
+
+class TestArxivCrossCheck:
+    """Tests for arXiv cross-check feature."""
+
+    def test_arxiv_cross_check_disabled(self, make_metadata):
+        """Test that arxiv_check=False skips cross-check."""
+        from bibtools.semantic_scholar import ResolvedIds
+
+        verifier = BibVerifier(skip_verified=True, arxiv_check=False)
+        # Different authors in metadata vs arxiv (would fail if checked)
+        metadata = make_metadata(
+            title="Test Paper",
+            authors=["Wrong Author"],  # Different from arXiv
+            year=2024,
+            source="dblp",
+        )
+        resolved = ResolvedIds(
+            paper_id="ARXIV:1234.5678",
+            doi=None,
+            arxiv_id="1234.5678",
+            dblp_id="conf/neurips/Test2024",
+        )
+        verifier._resolve_batch = MagicMock(return_value={"ARXIV:1234.5678": resolved})
+        verifier._fetch_with_resolved = MagicMock(return_value=metadata)
+
+        entry = {
+            "ID": "test2024",
+            "title": "Test Paper",
+            "author": "Wrong Author",
+            "year": "2024",
+            "eprint": "1234.5678",
+        }
+        content = "@article{test2024}"
+
+        result = verifier.verify_entry(entry, content)
+        # Should pass because arxiv_check is disabled
+        assert result.success is True
+
+    def test_arxiv_cross_check_authors_match(self, make_metadata):
+        """Test arxiv cross-check passes when authors match."""
+        from unittest.mock import patch
+
+        from bibtools.fetcher import ArxivMetadata
+        from bibtools.semantic_scholar import ResolvedIds
+
+        verifier = BibVerifier(skip_verified=True, arxiv_check=True)
+        metadata = make_metadata(
+            title="Test Paper",
+            authors=["John Smith", "Jane Doe"],
+            year=2024,
+            source="dblp",
+        )
+        resolved = ResolvedIds(
+            paper_id="ARXIV:1234.5678",
+            doi=None,
+            arxiv_id="1234.5678",
+            dblp_id="conf/neurips/Test2024",
+        )
+        verifier._resolve_batch = MagicMock(return_value={"ARXIV:1234.5678": resolved})
+        verifier._fetch_with_resolved = MagicMock(return_value=metadata)
+
+        # Mock arXiv client to return same authors
+        arxiv_meta = ArxivMetadata(
+            title="Test Paper",
+            authors=[{"given": "John", "family": "Smith"}, {"given": "Jane", "family": "Doe"}],
+            year=2024,
+            arxiv_id="1234.5678",
+        )
+        with patch.object(verifier._fetcher.arxiv_client, "get_paper_metadata", return_value=arxiv_meta):
+            entry = {
+                "ID": "test2024",
+                "title": "Test Paper",
+                "author": "Smith, John and Doe, Jane",
+                "year": "2024",
+                "eprint": "1234.5678",
+            }
+            content = "@article{test2024}"
+
+            result = verifier.verify_entry(entry, content)
+            assert result.success is True
+
+    def test_arxiv_cross_check_authors_mismatch(self, make_metadata):
+        """Test arxiv cross-check fails when authors mismatch."""
+        from unittest.mock import patch
+
+        from bibtools.fetcher import ArxivMetadata
+        from bibtools.semantic_scholar import ResolvedIds
+
+        verifier = BibVerifier(skip_verified=True, arxiv_check=True)
+        # DBLP returns wrong authors (this can happen with OpenVLA case)
+        metadata = make_metadata(
+            title="Test Paper",
+            authors=["Wrong Author", "Another Wrong"],
+            year=2024,
+            source="dblp",
+        )
+        resolved = ResolvedIds(
+            paper_id="ARXIV:1234.5678",
+            doi=None,
+            arxiv_id="1234.5678",
+            dblp_id="conf/neurips/Test2024",
+        )
+        verifier._resolve_batch = MagicMock(return_value={"ARXIV:1234.5678": resolved})
+        verifier._fetch_with_resolved = MagicMock(return_value=metadata)
+
+        # Mock arXiv client to return different (correct) authors
+        arxiv_meta = ArxivMetadata(
+            title="Test Paper",
+            authors=[{"given": "John", "family": "Smith"}, {"given": "Jane", "family": "Doe"}],
+            year=2024,
+            arxiv_id="1234.5678",
+        )
+        with patch.object(verifier._fetcher.arxiv_client, "get_paper_metadata", return_value=arxiv_meta):
+            entry = {
+                "ID": "test2024",
+                "title": "Test Paper",
+                "author": "Wrong Author and Another Wrong",
+                "year": "2024",
+                "eprint": "1234.5678",
+            }
+            content = "@article{test2024}"
+
+            result = verifier.verify_entry(entry, content)
+            assert result.success is False
+            assert "arXiv cross-check failed" in result.message
+            assert "authors mismatch" in result.message
+
+    def test_arxiv_cross_check_skipped_for_arxiv_source(self, make_metadata):
+        """Test arxiv cross-check is skipped when source is arxiv."""
+        from bibtools.semantic_scholar import ResolvedIds
+
+        verifier = BibVerifier(skip_verified=True, arxiv_check=True)
+        # Source is arxiv itself, no cross-check needed
+        metadata = make_metadata(
+            title="Test Paper",
+            authors=["John Smith"],
+            year=2024,
+            source="arxiv",  # Source is arxiv
+        )
+        resolved = ResolvedIds(
+            paper_id="ARXIV:1234.5678",
+            doi=None,
+            arxiv_id="1234.5678",
+            dblp_id=None,
+        )
+        verifier._resolve_batch = MagicMock(return_value={"ARXIV:1234.5678": resolved})
+        verifier._fetch_with_resolved = MagicMock(return_value=metadata)
+
+        entry = {
+            "ID": "test2024",
+            "title": "Test Paper",
+            "author": "Smith, John",
+            "year": "2024",
+            "eprint": "1234.5678",
+        }
+        content = "@article{test2024}"
+
+        result = verifier.verify_entry(entry, content)
+        # Should pass - no cross-check for arxiv source
+        assert result.success is True
+
+    def test_arxiv_cross_check_no_arxiv_id(self, make_metadata):
+        """Test arxiv cross-check is skipped when no arxiv_id."""
+        from bibtools.semantic_scholar import ResolvedIds
+
+        verifier = BibVerifier(skip_verified=True, arxiv_check=True)
+        metadata = make_metadata(
+            title="Test Paper",
+            authors=["John Smith"],
+            year=2024,
+            source="crossref",
+        )
+        resolved = ResolvedIds(
+            paper_id="DOI:10.1234/test",
+            doi="10.1234/test",
+            arxiv_id=None,  # No arxiv ID
+            dblp_id=None,
+        )
+        verifier._resolve_batch = MagicMock(return_value={"DOI:10.1234/test": resolved})
+        verifier._fetch_with_resolved = MagicMock(return_value=metadata)
+
+        entry = {
+            "ID": "test2024",
+            "title": "Test Paper",
+            "author": "Smith, John",
+            "year": "2024",
+            "doi": "10.1234/test",
+        }
+        content = "@article{test2024}"
+
+        result = verifier.verify_entry(entry, content)
+        # Should pass - no arxiv_id to cross-check
+        assert result.success is True
+
+    def test_arxiv_cross_check_api_error_continues(self, make_metadata):
+        """Test that arxiv API error does not fail verification."""
+        from unittest.mock import patch
+
+        from bibtools.semantic_scholar import ResolvedIds
+
+        verifier = BibVerifier(skip_verified=True, arxiv_check=True)
+        metadata = make_metadata(
+            title="Test Paper",
+            authors=["John Smith"],
+            year=2024,
+            source="dblp",
+        )
+        resolved = ResolvedIds(
+            paper_id="ARXIV:1234.5678",
+            doi=None,
+            arxiv_id="1234.5678",
+            dblp_id="conf/neurips/Test2024",
+        )
+        verifier._resolve_batch = MagicMock(return_value={"ARXIV:1234.5678": resolved})
+        verifier._fetch_with_resolved = MagicMock(return_value=metadata)
+
+        # Mock arXiv client to raise exception
+        with patch.object(
+            verifier._fetcher.arxiv_client,
+            "get_paper_metadata",
+            side_effect=Exception("arXiv API error"),
+        ):
+            entry = {
+                "ID": "test2024",
+                "title": "Test Paper",
+                "author": "Smith, John",
+                "year": "2024",
+                "eprint": "1234.5678",
+            }
+            content = "@article{test2024}"
+
+            result = verifier.verify_entry(entry, content)
+            # Should pass - arxiv error doesn't fail verification
+            assert result.success is True

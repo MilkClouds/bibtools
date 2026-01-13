@@ -34,6 +34,7 @@ class BibVerifier:
         max_age_days: int | None = None,
         auto_find_level: str = "id",
         fix_mismatches: bool = False,
+        arxiv_check: bool = True,
         console: Console | None = None,
         *,
         fetcher: MetadataFetcher | None = None,
@@ -46,6 +47,7 @@ class BibVerifier:
             max_age_days: Re-verify entries older than this many days. None = never re-verify.
             auto_find_level: Level of auto-find: "none", "id", or "title".
             fix_mismatches: Automatically fix mismatched fields.
+            arxiv_check: Cross-check with arXiv when arXiv ID exists.
             console: Rich console for output.
             fetcher: Optional pre-configured MetadataFetcher (for sharing).
         """
@@ -56,6 +58,7 @@ class BibVerifier:
         self.max_age_days = max_age_days
         self.auto_find_level = auto_find_level
         self.fix_mismatches = fix_mismatches
+        self.arxiv_check = arxiv_check
         self.console = console or Console()
 
         if auto_find_level not in (AUTO_FIND_NONE, AUTO_FIND_ID, AUTO_FIND_TITLE):
@@ -294,6 +297,45 @@ class BibVerifier:
 
         return mismatches, warnings
 
+    def _check_arxiv_cross_match(self, arxiv_id: str, metadata: PaperMetadata) -> str | None:
+        """Cross-check metadata from CrossRef/DBLP against arXiv.
+
+        This catches cases where DBLP returns the wrong paper (e.g., OpenVLA has
+        two different entries in DBLP with different authors).
+
+        Args:
+            arxiv_id: arXiv ID to fetch from.
+            metadata: Metadata from CrossRef/DBLP.
+
+        Returns:
+            Error message if mismatch detected, None if OK.
+        """
+        try:
+            arxiv_meta = self._fetcher.arxiv_client.get_paper_metadata(arxiv_id)
+        except Exception:
+            # If arXiv fetch fails, skip cross-check (don't fail verification)
+            return None
+
+        if not arxiv_meta:
+            return None
+
+        # Compare authors - use normalized comparison
+        arxiv_authors = [f"{a.get('given', '')} {a.get('family', '')}".strip() for a in arxiv_meta.authors]
+        source_authors = [f"{a.get('given', '')} {a.get('family', '')}".strip() for a in metadata.authors]
+
+        # Check if author lists match (normalized)
+        from .utils import normalize_author_name
+
+        arxiv_normalized = [normalize_author_name(a) for a in arxiv_authors]
+        source_normalized = [normalize_author_name(a) for a in source_authors]
+
+        if arxiv_normalized != source_normalized:
+            arxiv_str = ", ".join(arxiv_authors)
+            source_str = ", ".join(source_authors)
+            return f"authors mismatch - arXiv: [{arxiv_str}] vs {metadata.source}: [{source_str}]"
+
+        return None
+
     def _search_by_title_for_id(self, entry: dict) -> tuple[str | None, str | None]:
         """Search for paper by title and return paper_id if found with high confidence.
 
@@ -479,6 +521,21 @@ class BibVerifier:
                 auto_found_paper_id=auto_found,
                 paper_id_source=source,
             )
+
+        # Cross-check with arXiv if enabled and arXiv ID exists
+        # This catches cases where DBLP/CrossRef returns wrong paper (e.g., different authors)
+        if self.arxiv_check and resolved.arxiv_id and metadata.source != "arxiv":
+            arxiv_mismatch = self._check_arxiv_cross_match(resolved.arxiv_id, metadata)
+            if arxiv_mismatch:
+                return VerificationResult(
+                    entry_key=entry_key,
+                    success=False,
+                    message=f"arXiv cross-check failed: {arxiv_mismatch}",
+                    metadata=metadata,
+                    paper_id_used=paper_id,
+                    auto_found_paper_id=auto_found,
+                    paper_id_source=source,
+                )
 
         # Verify title, authors, year, venue match
         mismatches, warnings = self._check_field_mismatches(entry, metadata)

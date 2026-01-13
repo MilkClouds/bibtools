@@ -13,6 +13,8 @@
 ```
 bibtools verify main.bib
         ↓
+Skip already verified entries (% paper_id: ..., verified via ...)
+        ↓
 Extract paper_id (DOI/arXiv ID) from each entry
         ↓
 Semantic Scholar → Resolve to DOI/arXiv ID + venue
@@ -23,6 +25,9 @@ Semantic Scholar → Resolve to DOI/arXiv ID + venue
     │ elif venue == arXiv → arXiv             │
     │ else                → FAIL              │
     └─────────────────────────────────────────┘
+        ↓
+Cross-check with arXiv (if arXiv ID exists, --no-arxiv-check to disable)
+  → FAIL if authors mismatch between source and arXiv
         ↓
 Compare with existing entry → PASS / WARNING / FAIL
 ```

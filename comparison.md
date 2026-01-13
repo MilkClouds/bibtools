@@ -20,8 +20,9 @@ Comparison of BibTeX from **Google Scholar**, **Official sources**, and **bibtoo
 | LoRA: Low-Rank Adaptation of Large Language Models | ICLR 2022 | ✓ | ✓ | ✓ |
 | Scalable Diffusion Models with Transformers | ICCV 2023 | ✓ | ✓ | ✓ |
 | Efficient Streaming Language Models with Attention Sinks | ICLR 2024 | ✗ arXiv 2023 | ✓ | ✓ |
+| OpenVLA | CoRL 2024 | ✗ arXiv 2024 | ✓ | ✓ (catches [DBLP error](#7-openvla-corl-2024-️)) |
 | HAMLET | arXiv 2025 | ✓ | ✓ | ✓ |
-| Hi Robot | ICML 2025 | ✗ arXiv | ✓ | ✓ |
+| Hi Robot | ICML 2025 | ✗ arXiv | ✓ | ✓ (catches [DBLP error](#10-hi-robot-icml-2025-️)) |
 | Sliding Windows Are Not the End | ACL 2025 | ✓ | ✓ | ✓ |
 | FLOWER | CoRL 2025 | ✗ arXiv | ✓ | ✗ arXiv |
 
@@ -101,7 +102,22 @@ GS uses `@article` with fake volume=1, number=2, pages=3.
 
 ---
 
-### 7. HAMLET (arXiv 2025)
+### 7. OpenVLA (CoRL 2024) ⚠️
+
+| | Google Scholar | Official | bibtools |
+|-|----------------|----------|----------|
+| title | Openvla: An open-source... | OpenVLA: An Open-Source... | OpenVLA: An Open-Source... |
+| author | Kim, Moo Jin and ... others | Kim, Moo Jin and ... (17 total) | ⚠ arXiv cross-check failed |
+| venue | **arXiv preprint** ❌ | CoRL (PMLR) | CoRL |
+| year | 2024 | 2024 | 2024 |
+
+**GS shows arXiv preprint instead of CoRL 2024.**
+
+⚠ **bibtools arXiv cross-check**: DBLP has "Ethan Paul Foster", "Pannag R. Sanketi" but arXiv has "Ethan Foster", "Pannag Sanketi". Also arXiv includes "Grace Lam" who is not in DBLP.
+
+---
+
+### 9. HAMLET (arXiv 2025)
 
 | | Google Scholar | Official | bibtools |
 |-|----------------|----------|----------|
@@ -114,20 +130,22 @@ All sources agree (paper is arXiv-only).
 
 ---
 
-### 8. Hi Robot (ICML 2025) ⚠️
+### 10. Hi Robot (ICML 2025) ⚠️
 
 | | Google Scholar | Official | bibtools |
 |-|----------------|----------|----------|
 | title | Hi robot: Open-ended... | Hi Robot: Open-Ended... | Hi Robot: Open-Ended... |
-| author | Shi, Lucy Xiaoyang and ... others | Lucy Xiaoyang Shi and ... | Shi, Lucy Xiaoyang and ... |
+| author | Shi, Lucy Xiaoyang and ... others | Lucy Xiaoyang Shi and ... | ⚠ arXiv cross-check failed |
 | venue | **arXiv preprint** ❌ | ICML | ICML |
 | year | 2025 | 2025 | 2025 |
 
 **GS shows arXiv, but the paper was accepted at ICML 2025.**
 
+⚠ **bibtools arXiv cross-check**: DBLP has "Michael Robert Equi" but arXiv has "Michael Equi". This discrepancy is caught by arxiv cross-check.
+
 ---
 
-### 9. Sliding Windows (ACL 2025)
+### 11. Sliding Windows (ACL 2025)
 
 | | Google Scholar | Official | bibtools |
 |-|----------------|----------|----------|
@@ -138,22 +156,24 @@ All sources agree (paper is arXiv-only).
 
 ---
 
-### 10. FLOWER (CoRL 2025) ⚠️
+### 12. FLOWER (CoRL 2025) ⚠️
 
 | | Google Scholar | Official | bibtools |
 |-|----------------|----------|----------|
 | title | Flower: Democratizing... | FLOWER: Democratizing... | FLOWER: Democratizing... |
 | author | Reuss, Moritz and ... | Reuss, Moritz and ... | Reuss, Moritz and ... |
-| venue | **arXiv preprint** ❌ | CoRL | CoRL |
+| venue | **arXiv preprint** ❌ | CoRL | **arXiv** ❌ |
 | year | 2025 | 2025 | 2025 |
 
 **GS shows arXiv, but the paper was accepted at CoRL 2025.**
+
+❌ **bibtools**: Semantic Scholar has not yet updated to show CoRL 2025 venue.
 
 ---
 
 ## Common Google Scholar Errors
 
-1. **Wrong venue**: Shows "arXiv preprint" for conference papers (StreamingLLM, Hi Robot)
+1. **Wrong venue**: Shows "arXiv preprint" for conference papers (StreamingLLM, OpenVLA, Hi Robot, FLOWER)
 2. **Wrong year**: Shows arXiv submission year instead of publication year
 3. **Wrong type**: Uses `@article` for conference papers
 4. **Fake metadata**: Invents volume/number/pages (LoRA)

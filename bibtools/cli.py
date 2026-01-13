@@ -109,6 +109,13 @@ def verify(
             help="Auto-fix mismatched fields. Only allowed with --auto-find=none.",
         ),
     ] = False,
+    arxiv_check: Annotated[
+        bool,
+        typer.Option(
+            "--arxiv-check/--no-arxiv-check",
+            help="Cross-check with arXiv when arXiv ID exists. Detects wrong papers from DBLP/CrossRef.",
+        ),
+    ] = True,
 ) -> None:
     """Verify bibtex entries using Semantic Scholar API.
 
@@ -148,6 +155,9 @@ def verify(
     if fix:
         console.print("[yellow]⚠ Fix mode: enabled - will auto-correct mismatched fields[/]")
 
+    if not arxiv_check:
+        console.print("[dim]arXiv cross-check:[/] disabled")
+
     # Handle --reverify as --max-age=0
     effective_max_age = max_age
     if not skip_verified:
@@ -165,6 +175,7 @@ def verify(
         max_age_days=effective_max_age,
         auto_find_level=auto_find_level,
         fix_mismatches=fix,
+        arxiv_check=arxiv_check,
         console=console,
     )
 
