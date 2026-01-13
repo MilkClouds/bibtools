@@ -4,7 +4,9 @@ Comparison of BibTeX from **Google Scholar**, **Official sources**, and **bibtoo
 
 ## Summary
 
-**Google Scholar often has wrong venue/year for arXiv papers that were later published at conferences.** Out of 9 test papers, GS had critical errors in 2 cases (StreamingLLM, Hi Robot) where it showed "arXiv" instead of the actual conference. GS also uses lowercase titles and sometimes fabricates metadata (LoRA's fake volume/number/pages).
+**Google Scholar often has wrong venue/year for arXiv papers that were later published at conferences.** Out of 10 test papers, GS had critical errors in 3 cases (StreamingLLM, Hi Robot, FLOWER) where it showed "arXiv" instead of the actual conference. GS also uses lowercase titles and sometimes fabricates metadata (LoRA's fake volume/number/pages).
+
+**bibtools relies on Semantic Scholar**, which may not yet have updated venue info for very recent publications. FLOWER (CoRL 2025) is an example where Semantic Scholar still shows arXiv.
 
 **Official sources are always correct** but require manual effort to find the right publisher page.
 
@@ -21,6 +23,7 @@ Comparison of BibTeX from **Google Scholar**, **Official sources**, and **bibtoo
 | HAMLET | arXiv 2025 | ✓ | ✓ | ✓ |
 | Hi Robot | ICML 2025 | ✗ arXiv | ✓ | ✓ |
 | Sliding Windows Are Not the End | ACL 2025 | ✓ | ✓ | ✓ |
+| FLOWER | CoRL 2025 | ✗ arXiv | ✓ | ✗ arXiv |
 
 ---
 
@@ -132,6 +135,19 @@ All sources agree (paper is arXiv-only).
 | author | Liu, Wenhan and ... | Liu, Wenhan and ... | Liu, Wenhan and ... |
 | venue | Proceedings of the 63rd ACL... | Proceedings of the 63rd ACL... | Proceedings of the 63rd ACL... |
 | year | 2025 | 2025 | 2025 |
+
+---
+
+### 10. FLOWER (CoRL 2025) ⚠️
+
+| | Google Scholar | Official | bibtools |
+|-|----------------|----------|----------|
+| title | Flower: Democratizing... | FLOWER: Democratizing... | FLOWER: Democratizing... |
+| author | Reuss, Moritz and ... | Reuss, Moritz and ... | Reuss, Moritz and ... |
+| venue | **arXiv preprint** ❌ | CoRL | CoRL |
+| year | 2025 | 2025 | 2025 |
+
+**GS shows arXiv, but the paper was accepted at CoRL 2025.**
 
 ---
 
