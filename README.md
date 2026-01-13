@@ -15,20 +15,23 @@ bibtools verify main.bib
         ↓
 Extract paper_id (DOI/arXiv ID) from each entry
         ↓
-Semantic Scholar → Fetch official metadata from CrossRef/arXiv
+Semantic Scholar → Resolve to DOI/arXiv ID
+        ↓
+CrossRef (DOI) or arXiv → Fetch official metadata
         ↓
 Compare with existing entry → PASS / WARNING / FAIL
 ```
 
-**Data sources:**
-- **CrossRef** - Official DOI metadata submitted by publishers
-- **arXiv** - Preprint metadata
-- **Semantic Scholar** - Resolves identifiers, detects conference publication
+**Data sources (Source of Truth):**
+- **CrossRef** - Official DOI registry (publisher-submitted metadata: title, authors, venue, year)
+- **arXiv** - Preprint metadata (title, authors, year)
+- **Semantic Scholar** - ID resolution only (paper_id → DOI/arXiv ID, venue detection)
 
 ## Is it reliable?
 
 bibtools does **NOT generate or guess metadata**.
 It only uses data from CrossRef (official DOI registry) and arXiv (preprint source).
+Semantic Scholar is used only for identifier resolution, not as a metadata source.
 
 → [Comparison with Google Scholar](docs/comparison_with_google_scholar.md)
 
@@ -53,7 +56,7 @@ bibtools search "Attention Is All You Need"  # Search (use with caution)
 
 ### verify
 
-Verifies bibtex entries against Semantic Scholar.
+Verifies bibtex entries against official metadata from CrossRef/arXiv.
 
 ```bash
 bibtools verify main.bib                      # Default: --auto-find=id
@@ -63,12 +66,12 @@ bibtools verify main.bib --auto-find=none --fix  # Fix mode
 
 ### fetch
 
-Fetches bibtex by paper ID. Uses CrossRef for DOI-based lookups.
+Fetches bibtex by paper ID. Metadata from CrossRef (DOI) or arXiv.
 
 ```bash
-bibtools fetch ARXIV:2106.15928
-bibtools fetch DOI:10.18653/v1/N18-3011
-bibtools fetch DOI:10.1109/CVPR.2016.90  # ResNet - gets correct year from CrossRef
+bibtools fetch ARXIV:2106.15928              # Metadata from arXiv
+bibtools fetch DOI:10.18653/v1/N18-3011      # Metadata from CrossRef
+bibtools fetch DOI:10.1109/CVPR.2016.90      # ResNet - correct year from CrossRef
 ```
 
 ### search
