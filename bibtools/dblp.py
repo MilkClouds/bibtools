@@ -1,7 +1,6 @@
 """DBLP client for paper metadata.
 
 DBLP is used as a source of truth for papers without DOI (e.g., ICLR, some NeurIPS).
-Priority: DOI (CrossRef) > DBLP (venue != arXiv) > arXiv
 """
 
 import re
