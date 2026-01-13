@@ -33,7 +33,8 @@ class BibVerifier:
         skip_verified: bool = True,
         max_age_days: int | None = None,
         auto_find_level: str = "id",
-        fix_mismatches: bool = False,
+        fix_errors: bool = False,
+        fix_warnings: bool = False,
         arxiv_check: bool = True,
         mark_warnings_verified: bool = False,
         console: Console | None = None,
@@ -47,7 +48,8 @@ class BibVerifier:
             skip_verified: Skip entries that are already verified.
             max_age_days: Re-verify entries older than this many days. None = never re-verify.
             auto_find_level: Level of auto-find: "none", "id", or "title".
-            fix_mismatches: Automatically fix mismatched fields.
+            fix_errors: Automatically fix ERROR fields.
+            fix_warnings: Automatically fix WARNING fields.
             arxiv_check: Cross-check with arXiv when arXiv ID exists.
             mark_warnings_verified: Mark WARNING entries as verified (skip on future runs).
             console: Rich console for output.
@@ -59,7 +61,8 @@ class BibVerifier:
         self.skip_verified = skip_verified
         self.max_age_days = max_age_days
         self.auto_find_level = auto_find_level
-        self.fix_mismatches = fix_mismatches
+        self.fix_errors = fix_errors
+        self.fix_warnings = fix_warnings
         self.arxiv_check = arxiv_check
         self.mark_warnings_verified = mark_warnings_verified
         self.console = console or Console()
@@ -563,7 +566,7 @@ class BibVerifier:
         entry_key = entry.get("ID", "unknown")
 
         if mismatches:
-            if self.fix_mismatches:
+            if self.fix_errors:
                 return VerificationResult(
                     entry_key=entry_key,
                     success=True,
@@ -591,10 +594,15 @@ class BibVerifier:
                     warnings=warnings,
                 )
 
+        # Handle warnings - fix them if fix_warnings is enabled
+        fixed_warnings = self.fix_warnings and bool(warnings)
+
         message = "Verified"
-        if warnings:
+        if warnings and not self.fix_warnings:
             warning_fields = ", ".join(w.field_name for w in warnings)
             message = f"Verified (warning: {warning_fields} format differs)"
+        elif fixed_warnings:
+            message = "Fixed warnings and verified"
 
         return VerificationResult(
             entry_key=entry_key,
@@ -604,7 +612,9 @@ class BibVerifier:
             paper_id_used=paper_id,
             auto_found_paper_id=auto_found,
             paper_id_source=source,
-            warnings=warnings,
+            warnings=warnings if not self.fix_warnings else [],
+            mismatches=warnings if self.fix_warnings else [],
+            fixed=fixed_warnings,
             needs_update=True,
         )
 

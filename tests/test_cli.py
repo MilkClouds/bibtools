@@ -44,14 +44,23 @@ class TestVerifyCommand:
         assert result.exit_code == 1
         assert "Invalid --auto-find level" in result.output
 
-    def test_verify_fix_without_none(self, tmp_path):
-        """Test that --fix requires --auto-find=none."""
+    def test_verify_fix_errors_without_none(self, tmp_path):
+        """Test that --fix-errors requires --auto-find=none."""
         bib_file = tmp_path / "test.bib"
         bib_file.write_text("@article{test, title = {Test}}")
 
-        result = runner.invoke(app, ["verify", str(bib_file), "--fix"])
+        result = runner.invoke(app, ["verify", str(bib_file), "--fix-errors"])
         assert result.exit_code == 1
-        assert "--fix only allowed with --auto-find=none" in result.output
+        assert "--fix-errors/--fix-warnings only allowed with --auto-find=none" in result.output
+
+    def test_verify_fix_warnings_without_none(self, tmp_path):
+        """Test that --fix-warnings requires --auto-find=none."""
+        bib_file = tmp_path / "test.bib"
+        bib_file.write_text("@article{test, title = {Test}}")
+
+        result = runner.invoke(app, ["verify", str(bib_file), "--fix-warnings"])
+        assert result.exit_code == 1
+        assert "--fix-errors/--fix-warnings only allowed with --auto-find=none" in result.output
 
     @patch("bibtools.cli.BibVerifier")
     def test_verify_dry_run(self, mock_verifier_class, tmp_path):

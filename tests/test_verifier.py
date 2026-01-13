@@ -522,7 +522,7 @@ class TestVerifierWithMockAPI:
         """Test verify_entry detects field mismatch."""
         from bibtools.semantic_scholar import ResolvedIds
 
-        verifier = BibVerifier(skip_verified=True, auto_find_level="id", fix_mismatches=False)
+        verifier = BibVerifier(skip_verified=True, auto_find_level="id", fix_errors=False)
         metadata = make_metadata(
             title="Correct Title",
             authors=["John Smith"],
@@ -551,10 +551,10 @@ class TestVerifierWithMockAPI:
         assert len(result.mismatches) > 0
 
     def test_verify_entry_fix_mode(self, make_metadata):
-        """Test verify_entry with fix_mismatches=True."""
+        """Test verify_entry with fix_errors=True."""
         from bibtools.semantic_scholar import ResolvedIds
 
-        verifier = BibVerifier(skip_verified=True, auto_find_level="id", fix_mismatches=True)
+        verifier = BibVerifier(skip_verified=True, auto_find_level="id", fix_errors=True)
         metadata = make_metadata(
             title="Correct Title",
             authors=["John Smith"],

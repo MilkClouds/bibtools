@@ -80,7 +80,8 @@ Verifies bibtex entries against official metadata from CrossRef/DBLP/arXiv.
 ```bash
 bibtools verify main.bib                      # Default: --auto-find=id
 bibtools verify main.bib --auto-find=none     # Strict: comment only
-bibtools verify main.bib --auto-find=none --fix  # Fix mode
+bibtools verify main.bib --auto-find=none --fix-errors    # Fix errors
+bibtools verify main.bib --auto-find=none --fix-warnings  # Fix warnings (venue, case)
 ```
 
 ### fetch
@@ -140,21 +141,24 @@ Examples:
 ```
 
 States:
-- `% paper_id: ARXIV:xxx` - unverified
-- `% paper_id: ARXIV:xxx, verified via bibtools (YYYY.MM.DD)` - tool verified
+- `% paper_id: ARXIV:xxx` - paper_id only (WARNING result, will be re-verified)
+- `% paper_id: ARXIV:xxx, verified via bibtools (YYYY.MM.DD)` - PASS (skipped on future runs)
 - `% paper_id: DOI:xxx, verified via human(Name) (YYYY.MM.DD)` - human verified
 
-Only PASS results are marked as verified.
+**Verification comment behavior:**
+- **PASS**: Adds `verified via bibtools (date)` → skipped on future runs
+- **WARNING**: Adds `paper_id` only → re-verified on future runs
+- Use `--mark-warnings-verified` to mark WARNING as verified (skip future re-verification)
 
 ## Auto-find Levels
 
 | Level | Sources | Use case |
 |-------|---------|----------|
-| `none` | `% paper_id:` comment only | Strict, required for `--fix` |
+| `none` | `% paper_id:` comment only | Strict, required for `--fix-*` |
 | `id` | comment > `doi` > `eprint` | Default |
 | `title` | Above + title search | Risky |
 
-Auto-found paper_id is written only on PASS.
+Auto-found paper_id is written on PASS and WARNING.
 
 ## Options
 
@@ -162,7 +166,9 @@ Auto-found paper_id is written only on PASS.
 |--------|-------------|
 | `--dry-run` | Preview without modifying |
 | `--auto-find=none/id/title` | Paper ID discovery (default: id) |
-| `--fix` | Auto-correct (requires --auto-find=none) |
+| `--fix-errors` | Auto-fix ERROR fields (requires --auto-find=none) |
+| `--fix-warnings` | Auto-fix WARNING fields (requires --auto-find=none) |
+| `--mark-warnings-verified` | Mark WARNING entries as verified (skip future runs) |
 | `--reverify` | Re-verify verified entries |
 | `--max-age=N` | Re-verify entries older than N days |
 | `-o FILE` | Output to different file |

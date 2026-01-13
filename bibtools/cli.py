@@ -102,11 +102,18 @@ def verify(
             help="Auto-find paper_id level: none (comment only), id (+ doi/eprint), title (+ title search).",
         ),
     ] = "id",
-    fix: Annotated[
+    fix_errors: Annotated[
         bool,
         typer.Option(
-            "--fix",
-            help="Auto-fix mismatched fields. Only allowed with --auto-find=none.",
+            "--fix-errors",
+            help="Auto-fix ERROR fields. Only allowed with --auto-find=none.",
+        ),
+    ] = False,
+    fix_warnings: Annotated[
+        bool,
+        typer.Option(
+            "--fix-warnings",
+            help="Auto-fix WARNING fields (venue, title case, etc.) to match API values. Only allowed with --auto-find=none.",
         ),
     ] = False,
     arxiv_check: Annotated[
@@ -135,7 +142,7 @@ def verify(
       bibtools verify main.bib                    # default: --auto-find=id
       bibtools verify main.bib --auto-find=none   # strict: comment only
       bibtools verify main.bib --auto-find=title  # aggressive: title search
-      bibtools verify main.bib --auto-find=none --fix  # fix mode
+      bibtools verify main.bib --auto-find=none --fix-errors  # fix errors
     """
     # Validate auto-find level
     auto_find_level = auto_find.lower()
@@ -143,11 +150,11 @@ def verify(
         console.print(f"[bold red]Error:[/] Invalid --auto-find level: {auto_find}\nValid levels: none, id, title")
         raise typer.Exit(1)
 
-    # Safety check: --fix only allowed with --auto-find=none
-    if fix and auto_find_level != AUTO_FIND_NONE:
+    # Safety check: --fix-errors/--fix-warnings only allowed with --auto-find=none
+    if (fix_errors or fix_warnings) and auto_find_level != AUTO_FIND_NONE:
         console.print(
-            "[bold red]Error:[/] --fix only allowed with --auto-find=none\n"
-            "Use: bibtools verify --auto-find=none --fix main.bib"
+            "[bold red]Error:[/] --fix-errors/--fix-warnings only allowed with --auto-find=none\n"
+            "Use: bibtools verify --auto-find=none --fix-errors main.bib"
         )
         raise typer.Exit(1)
 
@@ -159,8 +166,10 @@ def verify(
         AUTO_FIND_TITLE: "[yellow]title[/] (comment + doi/eprint + title search)",
     }
     console.print(f"[dim]Auto-find level:[/] {level_desc[auto_find_level]}")
-    if fix:
-        console.print("[yellow]⚠ Fix mode: enabled - will auto-correct mismatched fields[/]")
+    if fix_errors:
+        console.print("[yellow]⚠ Fix errors: enabled[/]")
+    if fix_warnings:
+        console.print("[yellow]⚠ Fix warnings: enabled[/]")
 
     if not arxiv_check:
         console.print("[dim]arXiv cross-check:[/] disabled")
@@ -181,7 +190,8 @@ def verify(
         skip_verified=True,  # Always True when using max_age logic
         max_age_days=effective_max_age,
         auto_find_level=auto_find_level,
-        fix_mismatches=fix,
+        fix_errors=fix_errors,
+        fix_warnings=fix_warnings,
         arxiv_check=arxiv_check,
         mark_warnings_verified=mark_warnings_verified,
         console=console,
