@@ -35,6 +35,7 @@ class BibVerifier:
         auto_find_level: str = "id",
         fix_mismatches: bool = False,
         arxiv_check: bool = True,
+        mark_warnings_verified: bool = False,
         console: Console | None = None,
         *,
         fetcher: MetadataFetcher | None = None,
@@ -48,6 +49,7 @@ class BibVerifier:
             auto_find_level: Level of auto-find: "none", "id", or "title".
             fix_mismatches: Automatically fix mismatched fields.
             arxiv_check: Cross-check with arXiv when arXiv ID exists.
+            mark_warnings_verified: Mark WARNING entries as verified (skip on future runs).
             console: Rich console for output.
             fetcher: Optional pre-configured MetadataFetcher (for sharing).
         """
@@ -59,6 +61,7 @@ class BibVerifier:
         self.auto_find_level = auto_find_level
         self.fix_mismatches = fix_mismatches
         self.arxiv_check = arxiv_check
+        self.mark_warnings_verified = mark_warnings_verified
         self.console = console or Console()
 
         if auto_find_level not in (AUTO_FIND_NONE, AUTO_FIND_ID, AUTO_FIND_TITLE):
@@ -462,7 +465,13 @@ class BibVerifier:
                     updated_content = self._apply_field_fixes(
                         updated_content, entry, result.metadata, result.mismatches
                     )
-                updated_content = self._add_verification_comment(updated_content, entry, result.paper_id_used)
+                # PASS: always include "verified via" (skip on future runs)
+                # WARNING: include "verified via" only if mark_warnings_verified is set
+                is_pass = not result.warnings
+                include_verified = is_pass or self.mark_warnings_verified
+                updated_content = self._add_verification_comment(
+                    updated_content, entry, result.paper_id_used, include_verified=include_verified
+                )
 
         return report, updated_content
 
@@ -604,6 +613,7 @@ class BibVerifier:
         content: str,
         entry: dict,
         paper_id: str,
+        include_verified: bool = True,
     ) -> str:
         """Add a verification comment before an entry.
 
@@ -611,6 +621,7 @@ class BibVerifier:
             content: File content.
             entry: Bibtex entry dictionary.
             paper_id: Paper ID used for lookup. Required.
+            include_verified: If True, include "verified via bibtools (date)" suffix.
 
         Returns:
             Updated content with verification comment.
@@ -635,7 +646,7 @@ class BibVerifier:
         prefix = content[: match.start()]
 
         # Generate verification comment with paper_id embedded
-        comment = generate_verification_comment(paper_id)
+        comment = generate_verification_comment(paper_id, include_verified=include_verified)
 
         # Remove existing paper_id comment if present (any format)
         # Matches: "% paper_id: xxx" or "% paper_id: xxx, verified via ..."

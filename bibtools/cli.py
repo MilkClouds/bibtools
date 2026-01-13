@@ -116,6 +116,13 @@ def verify(
             help="Cross-check with arXiv when arXiv ID exists. Detects wrong papers from DBLP/CrossRef.",
         ),
     ] = True,
+    mark_warnings_verified: Annotated[
+        bool,
+        typer.Option(
+            "--mark-warnings-verified",
+            help="Mark WARNING entries as verified (skip on future runs). Default: only PASS entries.",
+        ),
+    ] = False,
 ) -> None:
     """Verify bibtex entries using Semantic Scholar API.
 
@@ -176,6 +183,7 @@ def verify(
         auto_find_level=auto_find_level,
         fix_mismatches=fix,
         arxiv_check=arxiv_check,
+        mark_warnings_verified=mark_warnings_verified,
         console=console,
     )
 
