@@ -268,9 +268,8 @@ class DBLPClient:
 
             return None
 
-        except httpx.HTTPError:
-            logger.debug(f"DBLP HTTP error for title search: {title[:50]}")
-            return None
+        except httpx.HTTPError as e:
+            raise DBLPError(f"Failed to search DBLP for title: {title[:50]}") from e
 
     def _titles_match(self, title1: str, title2: str) -> bool:
         def normalize(t: str) -> str:
