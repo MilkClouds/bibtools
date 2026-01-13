@@ -1,15 +1,4 @@
-"""Bibtex generation with single source of truth principle.
-
-Architecture:
-1. Semantic Scholar: Resolve identifier → DOI/arXiv ID + venue detection
-2. Source selection (mutually exclusive branches):
-   - if DOI exists        → CrossRef
-   - elif venue != arXiv  → DBLP
-   - elif venue == arXiv  → arXiv
-   - else                 → FAIL
-
-Each bibtex entry uses exactly ONE source of truth - no fallback.
-"""
+"""Bibtex generation with single source of truth principle."""
 
 import os
 
@@ -23,7 +12,7 @@ from .utils import format_author_bibtex_style
 
 
 class BibtexGenerator:
-    """Generate bibtex entries. Priority: CrossRef > DBLP > arXiv."""
+    """Generate bibtex entries with single source of truth."""
 
     def __init__(
         self,
@@ -73,10 +62,16 @@ class BibtexGenerator:
     def fetch_by_paper_id(self, paper_id: str) -> FetchResult | None:
         """Fetch bibtex by paper_id using single source of truth.
 
-        Flow: SS resolve → CrossRef (DOI) → DBLP (venue != arXiv) → arXiv
+        Flow:
+        1. S2 resolves paper_id → DOI/arXiv ID + venue
+        2. Source selection (mutually exclusive):
+           - if DOI exists        → CrossRef
+           - elif venue != arXiv  → DBLP
+           - elif venue == arXiv  → arXiv
+           - else                 → FAIL (return None)
+
         Returns None if paper not found. Raises on API errors.
         """
-        # Step 1: Resolve identifier via Semantic Scholar
         resolved = self.ss_client.resolve_ids(paper_id)
         if not resolved:
             log.debug(f"Paper not found in Semantic Scholar: {paper_id}")
@@ -86,15 +81,7 @@ class BibtexGenerator:
         return self._fetch_with_resolved_ids(paper_id, resolved)
 
     def _fetch_with_resolved_ids(self, paper_id: str, resolved: ResolvedIds) -> FetchResult | None:
-        """Fetch metadata using resolved DOI/arXiv ID + venue.
-
-        Source selection (mutually exclusive):
-        - if DOI exists       -> CrossRef
-        - elif venue != arXiv -> DBLP
-        - else                -> arXiv
-
-        Each entry uses exactly ONE source - no mixing or fallback.
-        """
+        """Fetch metadata using resolved IDs. Called by fetch_by_paper_id."""
         discrepancies: list[SourceDiscrepancy] = []
 
         # Case 1: DOI exists -> CrossRef

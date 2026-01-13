@@ -99,20 +99,7 @@ class BibVerifier:
         self.close()
 
     def _fetch_metadata(self, paper_id: str) -> PaperMetadata | None:
-        """Fetch paper metadata using single source of truth principle.
-
-        Priority:
-        1. S2 resolves paper_id → DOI/arXiv ID + venue detection
-        2. If DOI exists → fetch from CrossRef (primary source)
-        3. Else if venue != arXiv → fetch from DBLP (title-based search)
-        4. Else if arXiv → fetch from arXiv (preprints)
-
-        Args:
-            paper_id: Any paper identifier (DOI:xxx, ARXIV:xxx, CorpusId:xxx, etc.)
-
-        Returns:
-            PaperMetadata with source field set, or None if not found.
-        """
+        """Fetch paper metadata. See verify_entry for flow documentation."""
         # Step 1: Resolve to DOI/arXiv ID + venue via S2
         resolved = self.s2_client.resolve_ids(paper_id)
         if not resolved:
@@ -213,7 +200,15 @@ class BibVerifier:
         entry: dict,
         content: str,
     ) -> VerificationResult:
-        """Verify a single bibtex entry against CrossRef/arXiv.
+        """Verify a single bibtex entry.
+
+        Flow:
+        1. S2 resolves paper_id → DOI/arXiv ID + venue
+        2. Source selection (mutually exclusive):
+           - if DOI exists        → CrossRef
+           - elif venue != arXiv  → DBLP
+           - elif venue == arXiv  → arXiv
+           - else                 → FAIL (return None)
 
         Args:
             entry: Bibtex entry dictionary.
