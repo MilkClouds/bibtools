@@ -21,6 +21,17 @@ from .semantic_scholar import ResolvedIds, SemanticScholarClient
 from .venue_aliases import get_canonical_venue
 
 # =============================================================================
+# Exceptions
+# =============================================================================
+
+
+class FetchError(Exception):
+    """Base error for all metadata fetching errors."""
+
+    pass
+
+
+# =============================================================================
 # arXiv Client
 # =============================================================================
 
@@ -86,7 +97,7 @@ class ArxivClient:
         return Author(given="", family=parts[0]) if parts else None
 
 
-class ArxivError(Exception):
+class ArxivError(FetchError):
     """Error from arXiv API."""
 
     pass
@@ -185,7 +196,7 @@ class CrossRefClient:
         return CrossRefMetadata(title=title, authors=authors, venue=venue, year=year, doi=doi)
 
 
-class CrossRefError(Exception):
+class CrossRefError(FetchError):
     """Error from CrossRef API."""
 
     pass
@@ -308,7 +319,7 @@ class DBLPClient:
         return Author(given="", family=parts[0]) if parts else None
 
 
-class DBLPError(Exception):
+class DBLPError(FetchError):
     """Error from DBLP API."""
 
     pass
