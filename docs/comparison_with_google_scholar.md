@@ -197,24 +197,22 @@ $ bibtools fetch ARXIV:2303.08774
 | **Pages** | ❌ Not included | ✅ Included |
 | **Title case** | Title Case | lowercase |
 
+### GS Errors That bibtools Fixes
+
+| Paper | Google Scholar | bibtools |
+|-------|----------------|----------|
+| Hi Robot (2502.19417) | arXiv 2025 ❌ | ICML 2025 ✅ |
+| StreamingLLM (2309.17453) | arXiv 2023 ❌ | ICLR 2024 ✅ |
+
 ### Source Priority
 
-bibtools automatically selects the best available source based on SS venue:
-
-| Priority | Source | When Used | Example |
-|----------|--------|-----------|---------|
-| 1 | CrossRef | DOI exists | Most ACL papers with DOI |
-| 2 | DBLP | No DOI, venue != arXiv | ICLR, NeurIPS, ACL (title search) |
-| 3 | arXiv | venue == arXiv | Preprints only |
-
-### How It Works
-
-1. **Semantic Scholar** resolves paper ID → DOI, arXiv ID, venue, title
-2. If **DOI exists** → CrossRef (official publisher data)
-3. If **venue != arXiv** → DBLP title search with canonical venue name
-4. If **venue == arXiv** → arXiv metadata
+| Priority | Source | When Used |
+|----------|--------|-----------|
+| 1 | CrossRef | DOI exists |
+| 2 | DBLP | No DOI, venue != arXiv |
+| 3 | arXiv | venue == arXiv |
 
 ### Known Limitations
 
-- **No page numbers**: Page numbers are not included in CrossRef/DBLP/arXiv metadata.
-- **DBLP venue mapping**: Some venue names may not map correctly (e.g., workshops).
+- **No page numbers**: Not included in CrossRef/DBLP/arXiv metadata.
+- **Semantic Scholar coverage**: Some papers (e.g., LeCun's "Deep Learning" in Nature 2015) are not indexed.
