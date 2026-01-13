@@ -589,7 +589,7 @@ class TestVerifierWithMockAPI:
         bib_content = """@article{test2024,
   doi = {10.1234/example},
   title = {Test Paper},
-  author = {John Smith},
+  author = {Smith, John},
   year = {2024}
 }
 """
@@ -599,7 +599,7 @@ class TestVerifierWithMockAPI:
         verifier = BibVerifier(skip_verified=True)
         metadata = make_metadata(
             title="Test Paper",
-            authors=["John Smith"],
+            authors=["John Smith"],  # Will become {"given": "John", "family": "Smith"} -> "Smith, John"
             year=2024,
             venue="NeurIPS",
             doi="10.1234/example",
@@ -672,7 +672,7 @@ class TestVerifierWithMockAPI:
         bib_content = """% paper_id: ARXIV:1234.5678
 @article{test2024,
   title = {Test Paper},
-  author = {John Smith},
+  author = {Smith, John},
   year = {2024}
 }
 """
@@ -680,10 +680,10 @@ class TestVerifierWithMockAPI:
         bib_file.write_text(bib_content)
 
         verifier = BibVerifier(skip_verified=False)
-        # API returns exact match -> PASS
+        # API returns exact match -> PASS (bibtex uses "Smith, John" format)
         metadata = make_metadata(
             title="Test Paper",
-            authors=["John Smith"],
+            authors=["John Smith"],  # -> {"given": "John", "family": "Smith"} -> "Smith, John"
             year=2024,
         )
         # Mock batch resolve and fetch_with_resolved for verify_file

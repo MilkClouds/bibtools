@@ -221,9 +221,13 @@ class BibVerifier:
         # Check authors
         bib_author_field = entry.get("author", "")
         if bib_author_field and metadata.authors:
-            api_author_str = metadata.get_authors_str()
-            # compare_authors expects list of names, convert from dict format
-            author_names = [f"{a.get('given', '')} {a.get('family', '')}".strip() for a in metadata.authors]
+            api_author_str = metadata.get_authors_str()  # "Family, Given and ..." format
+            # compare_authors expects list of names in bibtex format (Family, Given)
+            from .utils import format_author_bibtex_style
+
+            author_names = [
+                format_author_bibtex_style(a.get("given", ""), a.get("family", "")) for a in metadata.authors
+            ]
             match, warning_only = compare_authors(bib_author_field, author_names)
             if not match:
                 mismatches.append(
