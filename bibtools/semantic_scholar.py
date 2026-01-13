@@ -5,11 +5,8 @@ from dataclasses import dataclass
 
 import httpx
 
-from .arxiv_client import ArxivClient
-from .crossref import CrossRefClient
-from .models import Author, BibtexEntry, PaperInfo
+from .models import BibtexEntry, PaperInfo
 from .rate_limiter import get_rate_limiter
-from .utils import format_author_bibtex_style, has_abbreviated_authors
 
 _BATCH_SIZE = 500
 
@@ -45,8 +42,6 @@ class SemanticScholarClient:
         self.max_retries = max_retries
         self._rate_limiter = get_rate_limiter(api_key)
         self._http_client: httpx.Client | None = None
-        self._crossref_client: CrossRefClient | None = None
-        self._arxiv_client: ArxivClient | None = None
 
     def _get_http_client(self) -> httpx.Client:
         """Get or create HTTP client with connection pooling."""
@@ -68,9 +63,6 @@ class SemanticScholarClient:
         if self._http_client is not None and not self._http_client.is_closed:
             self._http_client.close()
             self._http_client = None
-        if self._crossref_client is not None:
-            self._crossref_client.close()
-            self._crossref_client = None
 
     def __enter__(self) -> "SemanticScholarClient":
         return self
@@ -84,18 +76,6 @@ class SemanticScholarClient:
         if self.api_key:
             headers["x-api-key"] = self.api_key
         return headers
-
-    def _get_crossref_client(self) -> CrossRefClient:
-        """Get or create CrossRef client."""
-        if self._crossref_client is None:
-            self._crossref_client = CrossRefClient()
-        return self._crossref_client
-
-    def _get_arxiv_client(self) -> ArxivClient:
-        """Get or create arXiv client."""
-        if self._arxiv_client is None:
-            self._arxiv_client = ArxivClient()
-        return self._arxiv_client
 
     def _parse_paper(self, data: dict) -> PaperInfo | None:
         """Parse API response into PaperInfo.
@@ -121,144 +101,7 @@ class SemanticScholarClient:
             # Bibtex parsing failed - cannot create valid PaperInfo
             return None
 
-        # Extract external IDs for author enhancement
-        external_ids = data.get("externalIds", {}) or {}
-        doi = external_ids.get("DOI")
-        arxiv_id = external_ids.get("ArXiv")
-
-        # Enhance author names using external APIs
-        if bibtex.authors:
-            enhanced = self._enhance_authors(bibtex, doi, arxiv_id)
-            if enhanced is None:
-                # Author enhancement failed - abbreviated names remain
-                return None
-            bibtex = enhanced
-
         return PaperInfo(paper_id=paper_id, bibtex=bibtex)
-
-    def _enhance_authors(self, bibtex: BibtexEntry, doi: str | None, arxiv_id: str | None) -> BibtexEntry | None:
-        """Enhance abbreviated author names using CrossRef/arXiv APIs.
-
-        Returns BibtexEntry with full names, or None if abbreviated names remain.
-        """
-        if not has_abbreviated_authors(bibtex.authors):
-            bibtex.authors = self._format_authors_bibtex_style(bibtex.authors)
-            return bibtex
-
-        original_authors = bibtex.authors.copy()
-
-        # Try CrossRef first (most reliable for published papers)
-        if doi:
-            new_authors = self._fetch_crossref_authors(doi)
-            if new_authors and self._validate_authors(original_authors, new_authors):
-                bibtex.authors = [format_author_bibtex_style(a["given"], a["family"]) for a in new_authors]
-                if not has_abbreviated_authors(bibtex.authors):
-                    return bibtex
-
-        # Try arXiv API (for preprints)
-        if arxiv_id:
-            new_authors = self._fetch_arxiv_authors(arxiv_id)
-            if new_authors and self._validate_authors(original_authors, new_authors):
-                bibtex.authors = [format_author_bibtex_style(a["given"], a["family"]) for a in new_authors]
-                if not has_abbreviated_authors(bibtex.authors):
-                    return bibtex
-
-        return None  # Still has abbreviated names
-
-    def _fetch_crossref_authors(self, doi: str) -> list[Author] | None:
-        """Fetch author names from CrossRef.
-
-        Args:
-            doi: DOI to lookup.
-
-        Returns:
-            List of Author dicts, or None if failed.
-        """
-        crossref = self._get_crossref_client()
-        return crossref.get_authors_by_doi(doi)
-
-    def _fetch_arxiv_authors(self, arxiv_id: str) -> list[Author] | None:
-        """Fetch author names from arXiv.
-
-        Args:
-            arxiv_id: arXiv ID to lookup.
-
-        Returns:
-            List of Author dicts, or None if failed.
-        """
-        arxiv_client = self._get_arxiv_client()
-        return arxiv_client.get_authors_by_arxiv_id(arxiv_id)
-
-    def _validate_authors(self, original: list[str], new_authors: list[Author]) -> bool:
-        """Validate that new authors match original authors.
-
-        Checks that:
-        1. Author count is the same
-        2. Family names match (case-insensitive) in the same order
-
-        Args:
-            original: Original author name strings.
-            new_authors: List of Author dicts.
-
-        Returns:
-            True if validation passes, False otherwise.
-        """
-        if len(original) != len(new_authors):
-            return False
-
-        for orig_author, new_author in zip(original, new_authors):
-            orig_family = self._extract_family_name(orig_author)
-            new_family = new_author.get("family", "")
-
-            if orig_family.lower() != new_family.lower():
-                return False
-
-        return True
-
-    def _extract_family_name(self, author: str) -> str:
-        """Extract family name from an author string.
-
-        Handles both "Firstname Lastname" and "Lastname, Firstname" formats.
-
-        Args:
-            author: Full author name string.
-
-        Returns:
-            Family name portion.
-        """
-        author = " ".join(author.split())  # Normalize whitespace
-
-        if "," in author:
-            # "Lastname, Firstname" format
-            return author.split(",", 1)[0].strip()
-        else:
-            # "Firstname Lastname" format - last word is family name
-            parts = author.rsplit(None, 1)
-            return parts[-1].strip() if parts else author
-
-    def _format_authors_bibtex_style(self, authors: list[str]) -> list[str]:
-        """Format author names to bibtex style (Lastname, Firstname).
-
-        Args:
-            authors: List of author names in any format.
-
-        Returns:
-            List of author names in "Lastname, Firstname" format.
-        """
-        result = []
-        for author in authors:
-            author = " ".join(author.split())  # Normalize whitespace
-            if "," in author:
-                # Already in "Lastname, Firstname" format
-                result.append(author)
-            else:
-                # "Firstname Lastname" -> "Lastname, Firstname"
-                parts = author.rsplit(None, 1)
-                if len(parts) == 2:
-                    result.append(f"{parts[1]}, {parts[0]}")
-                else:
-                    result.append(author)
-        return result
 
     def _request_with_retry(
         self,

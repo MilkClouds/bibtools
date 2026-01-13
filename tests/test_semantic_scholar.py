@@ -54,8 +54,8 @@ class TestParsePaper:
         paper = client._parse_paper(data)
         assert paper.paper_id == "abc123"
         assert paper.title == "Test Paper Title"
-        # Authors are formatted to bibtex style: Lastname, Firstname
-        assert paper.authors == ["Smith, John", "Doe, Jane"]
+        # Authors are preserved as-is from bibtex
+        assert paper.authors == ["John Smith", "Jane Doe"]
         assert paper.year == 2024
         assert paper.venue == "Advances in Neural Information Processing Systems"
 
@@ -163,8 +163,8 @@ class TestSearchByTitle:
             client.search_by_title("test")
 
     @patch.object(SemanticScholarClient, "_request_with_retry")
-    def test_search_excludes_abbreviated_authors(self, mock_request):
-        """Test that papers with abbreviated authors are excluded."""
+    def test_search_returns_all_papers(self, mock_request):
+        """Test that all parseable papers are returned."""
         mock_response = MagicMock()
         mock_response.json.return_value = {
             "data": [
@@ -183,10 +183,10 @@ class TestSearchByTitle:
         client = SemanticScholarClient(api_key="test_search_5")
         results = client.search_by_title("test", limit=5)
 
-        # Paper 1 has abbreviated author "A. Smith" -> excluded
-        # Paper 2 has no authors -> included
-        assert len(results) == 1
-        assert results[0].paper_id == "2"
+        # All papers with valid bibtex are returned
+        assert len(results) == 2
+        assert results[0].paper_id == "1"
+        assert results[1].paper_id == "2"
 
 
 class TestGetPaper:
