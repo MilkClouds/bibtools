@@ -158,7 +158,7 @@ class SemanticScholarClient:
             limit: Maximum number of results.
 
         Returns:
-            List of matching papers (papers with abbreviated authors are excluded).
+            List of matching papers.
         """
         clean_title = title.replace("{", "").replace("}", "").replace("$", "")
 
